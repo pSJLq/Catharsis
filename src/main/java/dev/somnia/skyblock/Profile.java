@@ -47,6 +47,8 @@ final class Profile {
     int questStep;
     int questProgress;
     long fishingXp;
+    /** Leftover tenths of skill XP per Skills.Skill ordinal (pumpkin +4.5); never sent onchain until they add up to 1. */
+    final int[] xpTenths = new int[7];
     long enchantingXp;
     long carpentryXp;
     /** Discovered hub zones, unlocked collections ("c:"), discovered stats ("s:"). */

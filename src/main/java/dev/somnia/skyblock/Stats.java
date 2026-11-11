@@ -33,8 +33,16 @@ import java.util.concurrent.ThreadLocalRandom;
  * defense drive every PvE hit. There is no PvP anywhere.
  */
 final class Stats implements Listener {
-    static final long[] COMBAT = {0, 50, 175, 375, 675, 1175, 1925, 2925, 4425, 6425, 9925,
-            14925, 22425, 32425, 47425, 67425, 97425, 147425, 222425, 322425, 522425};
+    /** Combat uses the same wiki skill curve as every other skill (cumulative XP per level, capped at v1 level 25). */
+    static final long[] COMBAT = combatTable();
+
+    private static long[] combatTable() {
+        long[] out = new long[ProgressMath.V1_CAP + 1];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = ProgressMath.levelStart(i);
+        }
+        return out;
+    }
 
     record Sheet(int health, int defense, int strength, int critChance, int critDamage, int damage, Gear.Kind weapon, int intelligence, int speed) {
     }
@@ -62,11 +70,7 @@ final class Stats implements Listener {
     }
 
     static int combatLevel(long xp) {
-        int level = 0;
-        while (level + 1 < COMBAT.length && xp >= COMBAT[level + 1]) {
-            level++;
-        }
-        return level;
+        return ProgressMath.level(xp);
     }
 
     static long nextLevelXp(int level) {
@@ -76,9 +80,12 @@ final class Stats implements Listener {
     Sheet sheet(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         int level = combatLevel(profile.combatXp);
-        int health = 100 + level * 2;
+        // Wiki base stats: 100 Health, 0 Defense, 0 Strength, 30% Crit Chance, 50% Crit Damage, 100 Speed.
+        // SkyBlock Level: +5 Health per level, +1 Strength every 5 levels. Combat: +0.5% Crit Chance per level.
+        int sbLevel = Skills.skyblockLevel(profile);
+        int health = 100 + sbLevel * 5;
         int defense = 0;
-        int strength = level;
+        int strength = sbLevel / 5;
         int critChance = 30 + level / 2;
         int critDamage = 50;
         int damage = 0;
@@ -116,18 +123,28 @@ final class Stats implements Listener {
         return new Sheet(health, defense, strength, critChance, critDamage, damage, weapon, intelligence, 100);
     }
 
-    /** Damage formula: (5 + weapon) * (1 + strength/100) * (1 + critDamage/100 on a crit). */
+    /**
+     * Wiki Damage Calculation: (5 + weapon) * (1 + strength/100), * (1 + critDamage/100) on a crit,
+     * * additive (1 + Warrior 4% per Combat level), * multiplicative (undead bonus), rounded down.
+     */
     Hit attack(Player player, boolean undead, double scale) {
         Sheet sheet = sheet(player);
+        Profile profile = plugin.profiles().get(player.getUniqueId());
         double base = (5 + sheet.damage()) * (1 + sheet.strength() / 100.0);
-        if (undead) {
-            base *= Gear.undeadMultiplier(sheet.weapon());
-        }
         boolean crit = ThreadLocalRandom.current().nextInt(100) < sheet.critChance();
         if (crit) {
             base *= 1 + sheet.critDamage() / 100.0;
         }
-        return new Hit(Math.max(1, base * scale), crit);
+        base *= 1 + warrior(combatLevel(profile.combatXp)) / 100.0;
+        if (undead) {
+            base *= Gear.undeadMultiplier(sheet.weapon());
+        }
+        return new Hit(Math.max(1, Math.floor(base * scale)), crit);
+    }
+
+    /** Warrior (Combat perk): +4% damage to mobs per level 1-50, +1% per level 51-60. */
+    static int warrior(int combatLevel) {
+        return 4 * Math.min(combatLevel, 50) + Math.max(0, combatLevel - 50);
     }
 
     double health(Player player) {
@@ -238,7 +255,7 @@ final class Stats implements Listener {
                 plugin.islands().teleport(player, profile);
             }
         }
-        player.sendMessage(Component.text("☠ You were killed by " + source + (lost > 0 ? " and lost " + String.format("%,d", lost) + " coins." : "."), NamedTextColor.RED));
+        player.sendMessage(Component.text("☠ You were killed by " + source + (lost > 0 ? " and lost " + String.format(java.util.Locale.ROOT, "%,d", lost) + " coins." : "."), NamedTextColor.RED));
         markDirty(player);
     }
 
@@ -254,7 +271,7 @@ final class Stats implements Listener {
     boolean spendCoins(Player player, long coins) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (profile.coins < coins) {
-            player.sendMessage(Component.text("You need " + String.format("%,d", coins) + " coins (you have " + String.format("%,d", profile.coins) + ").", NamedTextColor.RED));
+            player.sendMessage(Component.text("You need " + String.format(java.util.Locale.ROOT, "%,d", coins) + " coins (you have " + String.format(java.util.Locale.ROOT, "%,d", profile.coins) + ").", NamedTextColor.RED));
             return false;
         }
         profile.coins -= coins;
@@ -464,7 +481,7 @@ final class Stats implements Listener {
         }
         player.sendMessage(Component.text(skills.toString().trim(), NamedTextColor.DARK_AQUA));
         player.sendMessage(Component.text("SkyBlock Level " + Skills.skyblockLevel(profile) + "   Collections " + Collects.unlocked(profile) + "/" + Collects.ENTRIES.size(), NamedTextColor.AQUA));
-        player.sendMessage(Component.text("Coins " + String.format("%,d", profile.coins) + "   Purse " + WalletService.shortAddress(profile.wallet), NamedTextColor.GOLD));
+        player.sendMessage(Component.text("Coins " + String.format(java.util.Locale.ROOT, "%,d", profile.coins) + "   Purse " + WalletService.shortAddress(profile.wallet), NamedTextColor.GOLD));
         if (plugin.realm().enabled()) {
             player.sendMessage(plugin.realm().contractLine());
         }

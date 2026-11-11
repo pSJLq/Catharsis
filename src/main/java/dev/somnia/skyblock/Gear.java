@@ -55,27 +55,27 @@ final class Gear {
     static final Map<String, Kind> KINDS = new LinkedHashMap<>();
 
     static {
-        weapon("undead_sword", Material.IRON_SWORD, "Undead Sword", Rarity.COMMON, 30, 0, 0, 0,
-                "Deals +100% damage to undead.");
-        weapon("cleaver", Material.GOLDEN_SWORD, "Cleaver", Rarity.UNCOMMON, 40, 10, 0, 0,
+        weapon("undead_sword", Material.IRON_SWORD, "Barrow Blade", Rarity.COMMON, 30, 0, 0, 0,
+                "Hits the restless dead twice as hard.");
+        weapon("cleaver", Material.GOLDEN_SWORD, "Butcher's Blade", Rarity.UNCOMMON, 40, 10, 0, 0,
                 "A heavy butcher blade from the Hub smithy.");
         weapon("graveknight_blade", Material.IRON_SWORD, "Graveknight Blade", Rarity.RARE, 70, 25, 5, 20,
-                "Forged from Revenant Flesh. Deals +50% damage to undead.");
+                "Forged from Barrow Flesh. Hits undead 50% harder.");
         weapon("champion_blade", Material.DIAMOND_SWORD, "Champion's Blade", Rarity.LEGENDARY, 120, 60, 10, 50,
                 "Rolled by Somnia VRF in the Colosseum, or forged from sigils.");
         armor("graveyard_helmet", Material.CHAINMAIL_HELMET, "Barrow Helmet", Rarity.COMMON, Slot.HELMET, 10, 10, 0);
         armor("graveyard_chestplate", Material.CHAINMAIL_CHESTPLATE, "Barrow Chestplate", Rarity.COMMON, Slot.CHESTPLATE, 25, 20, 0);
         armor("graveyard_leggings", Material.CHAINMAIL_LEGGINGS, "Barrow Leggings", Rarity.COMMON, Slot.LEGGINGS, 20, 15, 0);
         armor("graveyard_boots", Material.CHAINMAIL_BOOTS, "Barrow Boots", Rarity.COMMON, Slot.BOOTS, 10, 10, 0);
-        armor("revenant_helmet", Material.IRON_HELMET, "Revenant Helmet", Rarity.RARE, Slot.HELMET, 30, 25, 5);
-        armor("revenant_chestplate", Material.IRON_CHESTPLATE, "Revenant Chestplate", Rarity.RARE, Slot.CHESTPLATE, 70, 50, 5);
-        armor("revenant_leggings", Material.IRON_LEGGINGS, "Revenant Leggings", Rarity.RARE, Slot.LEGGINGS, 55, 40, 5);
-        armor("revenant_boots", Material.IRON_BOOTS, "Revenant Boots", Rarity.RARE, Slot.BOOTS, 30, 25, 5);
-        material("revenant_flesh", Material.ROTTEN_FLESH, "Revenant Flesh", Rarity.UNCOMMON,
+        armor("revenant_helmet", Material.IRON_HELMET, "Hollowguard Helmet", Rarity.RARE, Slot.HELMET, 30, 25, 5);
+        armor("revenant_chestplate", Material.IRON_CHESTPLATE, "Hollowguard Chestplate", Rarity.RARE, Slot.CHESTPLATE, 70, 50, 5);
+        armor("revenant_leggings", Material.IRON_LEGGINGS, "Hollowguard Leggings", Rarity.RARE, Slot.LEGGINGS, 55, 40, 5);
+        armor("revenant_boots", Material.IRON_BOOTS, "Hollowguard Boots", Rarity.RARE, Slot.BOOTS, 30, 25, 5);
+        material("revenant_flesh", Material.ROTTEN_FLESH, "Barrow Flesh", Rarity.UNCOMMON,
                 "A rare drop from the Ashen Barrows and Hollow Crypts undead.");
         material("enchanted_rotten_flesh", Material.ROTTEN_FLESH, "Enchanted Rotten Flesh", Rarity.UNCOMMON,
                 "160 rotten flesh compacted at the Blacksmith.");
-        material("wolf_tooth", Material.GHAST_TEAR, "Wolf Tooth", Rarity.UNCOMMON,
+        material("wolf_tooth", Material.GHAST_TEAR, "Thornkeep Fang", Rarity.UNCOMMON,
                 "Pulled from the Thornkeep Wolves.");
         material("colosseum_sigil", Material.HEART_OF_THE_SEA, "Colosseum Sigil", Rarity.EPIC,
                 "Proof of a ranked run. Its roll is on Somnia.");
@@ -129,54 +129,24 @@ final class Gear {
         }
         ItemStack stack = new ItemStack(kind.material());
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text(kind.name(), kind.rarity().color).decoration(TextDecoration.ITALIC, false));
-        List<Component> lore = new ArrayList<>();
-        stat(lore, "Damage", kind.damage(), "", NamedTextColor.RED);
-        stat(lore, "Strength", kind.strength(), "", NamedTextColor.RED);
-        stat(lore, "Crit Chance", kind.critChance(), "%", NamedTextColor.RED);
-        stat(lore, "Crit Damage", kind.critDamage(), "%", NamedTextColor.RED);
-        stat(lore, "Health", kind.health(), " HP", NamedTextColor.GREEN);
-        stat(lore, "Defense", kind.defense(), "", NamedTextColor.GREEN);
-        if (!kind.lore().isEmpty()) {
-            if (!lore.isEmpty()) {
-                lore.add(Component.empty());
-            }
-            lore.add(gray(kind.lore()));
-        }
-        lore.add(Component.empty());
-        lore.add(Component.text(kind.rarity().name() + " " + typeName(kind.slot()), kind.rarity().color)
-                .decoration(TextDecoration.BOLD, true).decoration(TextDecoration.ITALIC, false));
-        lore.add(Component.text("Stored in your SkyWord bag on Somnia", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
-        meta.lore(lore);
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item"), PersistentDataType.STRING, id);
+        Lore.gear(meta, kind);
         if (kind.rarity().ordinal() >= Rarity.RARE.ordinal() || kind.id().startsWith("enchanted_")) {
             meta.setEnchantmentGlintOverride(true);
         }
-        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "item"), PersistentDataType.STRING, id);
         stack.setItemMeta(meta);
         stack.setAmount(Math.max(1, Math.min(amount, stack.getMaxStackSize())));
         return stack;
     }
 
-    private static void stat(List<Component> lore, String name, int value, String suffix, NamedTextColor color) {
-        if (value == 0) {
-            return;
-        }
-        lore.add(Component.text(name + ": ", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)
-                .append(Component.text("+" + value + suffix, color)));
-    }
-
-    private static Component gray(String text) {
-        return Component.text(text, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false);
-    }
-
-    private static String typeName(Slot slot) {
+    static String typeName(Slot slot) {
         return switch (slot) {
             case WEAPON -> "SWORD";
             case HELMET -> "HELMET";
             case CHESTPLATE -> "CHESTPLATE";
             case LEGGINGS -> "LEGGINGS";
             case BOOTS -> "BOOTS";
-            case MATERIAL -> "MATERIAL";
+            case MATERIAL -> "ITEM";
         };
     }
 
@@ -194,11 +164,19 @@ final class Gear {
             case IRON_SWORD -> 30;
             case DIAMOND_SWORD -> 35;
             case NETHERITE_SWORD -> 40;
-            case WOODEN_AXE, GOLDEN_AXE -> 15;
-            case STONE_AXE -> 20;
+            // Wiki Axes: Wooden 10, Stone 15, Golden 20, Iron 25, Diamond 30. Netherite is ours.
+            case WOODEN_AXE -> 10;
+            case STONE_AXE -> 15;
+            case GOLDEN_AXE -> 20;
             case IRON_AXE -> 25;
             case DIAMOND_AXE -> 30;
             case NETHERITE_AXE -> 35;
+            // Wiki pickaxe / shovel infobox damage: Wooden and Golden 15, Stone 20, Iron 25, Diamond 30. Netherite is ours.
+            case WOODEN_PICKAXE, GOLDEN_PICKAXE, WOODEN_SHOVEL, GOLDEN_SHOVEL -> 15;
+            case STONE_PICKAXE, STONE_SHOVEL -> 20;
+            case IRON_PICKAXE, IRON_SHOVEL -> 25;
+            case DIAMOND_PICKAXE, DIAMOND_SHOVEL -> 30;
+            case NETHERITE_PICKAXE, NETHERITE_SHOVEL -> 35;
             case BOW -> 30;
             default -> 0;
         };
@@ -210,34 +188,32 @@ final class Gear {
 
     static boolean isAspect(SomniaSkyblockPlugin plugin, ItemStack stack) {
         return stack != null && stack.getType() == Material.NETHERITE_SWORD && stack.hasItemMeta()
-                && stack.getItemMeta().getPersistentDataContainer().has(new NamespacedKey(plugin, "aotv"), PersistentDataType.LONG);
+                && stack.getItemMeta().getPersistentDataContainer().has(NamespacedKey.fromString("somniaskyblock:aotv"), PersistentDataType.LONG);
     }
 
+    /** Wiki Armor table (Leather 6/15/10/5, Gold 10/25/15/5, Chainmail 12/30/20/7, Iron 12/30/25/10, Diamond 15/40/30/15). Netherite is ours. */
     static int vanillaDefense(Material type) {
         String name = type.name();
-        int tier;
+        int[] set; // helmet, chestplate, leggings, boots
         if (name.startsWith("LEATHER_")) {
-            tier = 1;
-        } else if (name.startsWith("GOLDEN_") || name.startsWith("CHAINMAIL_")) {
-            tier = 2;
+            set = new int[]{6, 15, 10, 5};
+        } else if (name.startsWith("GOLDEN_")) {
+            set = new int[]{10, 25, 15, 5};
+        } else if (name.startsWith("CHAINMAIL_")) {
+            set = new int[]{12, 30, 20, 7};
         } else if (name.startsWith("IRON_")) {
-            tier = 3;
+            set = new int[]{12, 30, 25, 10};
         } else if (name.startsWith("DIAMOND_")) {
-            tier = 5;
+            set = new int[]{15, 40, 30, 15};
         } else if (name.startsWith("NETHERITE_")) {
-            tier = 6;
+            set = new int[]{20, 50, 40, 20};
         } else {
             return 0;
         }
-        if (name.endsWith("_CHESTPLATE")) {
-            return tier * 8;
-        }
-        if (name.endsWith("_LEGGINGS")) {
-            return tier * 6;
-        }
-        if (name.endsWith("_HELMET") || name.endsWith("_BOOTS")) {
-            return tier * 3;
-        }
+        if (name.endsWith("_HELMET")) return set[0];
+        if (name.endsWith("_CHESTPLATE")) return set[1];
+        if (name.endsWith("_LEGGINGS")) return set[2];
+        if (name.endsWith("_BOOTS")) return set[3];
         return 0;
     }
 

@@ -111,7 +111,7 @@ final class Arena implements Listener {
                 "Clear wave 3+: Somnia VRF rolls your loot and",
                 "a 17–45% chance at a Relic (a share of the pool).",
                 "Loot: Champion's Blade 1%, Colosseum Sigil 5%,",
-                "Revenant Flesh, Wolf Teeth or coins.",
+                "Barrow Flesh, Thornkeep Fangs or coins.",
                 status, "!Click to sign the entry")), click -> {
             player.closeInventory();
             ranked(player);

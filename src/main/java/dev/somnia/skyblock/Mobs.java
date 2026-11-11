@@ -54,16 +54,18 @@ final class Mobs implements Listener {
     record Drop(String key, int min, int max, double chance) {
     }
 
+    // Hub mob numbers (level / HP / damage / Combat XP / coins) follow the wiki role counterparts:
+    // Graveyard Zombie, Zombie Villager, Crypt Ghoul, Golden Ghoul, Wolf. Alpha Direwolf, Bone Archer and the arena pack are ours.
     enum Type {
-        GRAVEYARD_ZOMBIE("Barrow Shambler", EntityType.ZOMBIE, 1, 100, 20, 6, 1, 3, true,
+        GRAVEYARD_ZOMBIE("Barrow Shambler", EntityType.ZOMBIE, 1, 100, 20, 5, 1, 1, true,
                 List.of(new Drop("minecraft:rotten_flesh", 1, 2, 1.0), new Drop("skyblock:revenant_flesh", 1, 1, 0.03))),
-        ZOMBIE_VILLAGER("Hollow Villager", EntityType.ZOMBIE_VILLAGER, 2, 120, 24, 7, 2, 4, true,
+        ZOMBIE_VILLAGER("Hollow Villager", EntityType.ZOMBIE_VILLAGER, 2, 120, 24, 5, 1, 1, true,
                 List.of(new Drop("minecraft:rotten_flesh", 1, 3, 1.0), new Drop("skyblock:revenant_flesh", 1, 1, 0.04))),
-        CRYPT_GHOUL("Crypt Wight", EntityType.ZOMBIE, 6, 500, 60, 22, 10, 20, true,
+        CRYPT_GHOUL("Crypt Wight", EntityType.ZOMBIE, 33, 2000, 350, 49, 11, 11, true,
                 List.of(new Drop("minecraft:rotten_flesh", 2, 4, 1.0), new Drop("skyblock:revenant_flesh", 1, 2, 0.30))),
-        GILDED_GHOUL("Gilded Wight", EntityType.ZOMBIE, 12, 2500, 110, 90, 60, 120, true,
+        GILDED_GHOUL("Gilded Wight", EntityType.ZOMBIE, 65, 20000, 500, 97, 21, 21, true,
                 List.of(new Drop("skyblock:revenant_flesh", 2, 5, 1.0), new Drop("minecraft:gold_ingot", 2, 6, 1.0), new Drop("minecraft:gold_block", 1, 1, 0.10))),
-        OLD_WOLF("Thornkeep Wolf", EntityType.WOLF, 8, 250, 45, 15, 6, 12, false,
+        OLD_WOLF("Thornkeep Wolf", EntityType.WOLF, 11, 500, 75, 16, 3, 3, false,
                 List.of(new Drop("minecraft:bone", 1, 2, 1.0), new Drop("skyblock:wolf_tooth", 1, 1, 0.20))),
         DIRE_ALPHA("Alpha Direwolf", EntityType.WOLF, 14, 1800, 80, 70, 40, 90, false,
                 List.of(new Drop("skyblock:wolf_tooth", 2, 4, 1.0), new Drop("minecraft:bone", 3, 6, 1.0))),
@@ -464,7 +466,7 @@ final class Mobs implements Listener {
         long value = Math.round(hit.amount());
         Component text;
         if (hit.crit()) {
-            String digits = "✧" + String.format("%,d", value) + "✧";
+            String digits = "✧" + String.format(java.util.Locale.ROOT, "%,d", value) + "✧";
             NamedTextColor[] colors = {NamedTextColor.WHITE, NamedTextColor.YELLOW, NamedTextColor.GOLD, NamedTextColor.RED};
             Component built = Component.empty();
             for (int i = 0; i < digits.length(); i++) {
@@ -472,7 +474,7 @@ final class Mobs implements Listener {
             }
             text = built;
         } else {
-            text = Component.text(String.format("%,d", value), NamedTextColor.GRAY);
+            text = Component.text(String.format(java.util.Locale.ROOT, "%,d", value), NamedTextColor.GRAY);
         }
         TextDisplay display = mob.getWorld().spawn(at, TextDisplay.class, d -> {
             d.text(text);

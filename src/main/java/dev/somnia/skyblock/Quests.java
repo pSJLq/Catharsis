@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * The intro quest line, given by Wren on the island and the Quest Giver in Lumenhold:
  * island basics → the hub resource zones → selling → combat → gear → bazaar and auctions.
- * Each finished step is worth 10 SkyBlock XP (Skills.skyblockXp counts questStep) plus the listed reward.
+ * Each finished step is worth 5 SkyBlock XP (Skills.skyblockXp counts questStep) plus the listed reward.
  * Skill XP rewards go through Skills.add, so they are queued in the same onchain SkySkills batch as any other XP.
  */
 final class Quests {
@@ -28,7 +28,8 @@ final class Quests {
         }
     }
 
-    static final int SKYBLOCK_XP = 10;
+    /** Wiki SkyBlock Levels: +5 SkyBlock XP per objective completed. */
+    static final int SKYBLOCK_XP = 5;
 
     static final List<Step> STEPS = List.of(
             new Step("talk_wren", 1, 25, null, 0, "Talk to Wren, your Island Guide", "Wren stands next to your island spawn. Click her."),

@@ -53,10 +53,17 @@ final class HoldItems {
         return Math.max(0, damageable.getDamage());
     }
 
+    /** Normalizes a stack: no durability loss, and the SkyBlock tooltip layout ({@link Lore}). True when it changed. */
     static boolean makeUnbreakable(ItemStack stack) {
         if (stack == null || stack.getType().isAir()) {
             return false;
         }
+        boolean changed = solid(stack);
+        changed |= Lore.normalize(stack);
+        return changed;
+    }
+
+    private static boolean solid(ItemStack stack) {
         if (stack.getType().getMaxDurability() <= 0) {
             return stripDurability(stack);
         }

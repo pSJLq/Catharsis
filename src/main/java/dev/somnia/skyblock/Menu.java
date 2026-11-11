@@ -56,10 +56,10 @@ class Menu implements InventoryHolder {
 
     private static ItemStack skill(Material material, String name, long xp) {
         int level = ProgressMath.level(xp);
-        int next = ProgressMath.nextLevelXp(level);
+        long next = ProgressMath.nextLevelXp(level);
         return item(material, name + " " + level, List.of(
                 "XP: " + xp,
-                level >= 9 ? "Top of this track." : "Next level: " + next
+                level >= ProgressMath.maxLevel() ? "Top of this track." : "Next level: " + next
         ));
     }
 

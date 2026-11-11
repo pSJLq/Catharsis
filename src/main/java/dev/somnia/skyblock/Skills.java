@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * All SkyBlock skills in one place: XP tables, per-level stat perks, coin and SkyBlock XP rewards,
  * the "+6 Foraging (18/50)" action bar flash and the framed SKILL LEVEL UP chat block.
- * Combat keeps its own table in {@link Stats#COMBAT}; every other skill uses {@link ProgressMath}.
+ * Every skill uses the wiki curve in {@link ProgressMath} ({@link Stats#COMBAT} is the same table).
  */
 final class Skills implements Listener {
     enum Skill {
@@ -113,11 +113,36 @@ final class Skills implements Listener {
     }
 
     static long coinsFor(int level) {
-        return level <= 0 ? 0 : level <= 5 ? 100L * level : level <= 10 ? 1000L * (level - 4) : 5000L * (level - 8);
+        return ProgressMath.coinsFor(level);
     }
 
     static int sbXpFor(int level) {
-        return level <= 0 ? 0 : level < 10 ? 5 : level < 20 ? 10 : 20;
+        return ProgressMath.sbXpFor(level);
+    }
+
+    /**
+     * Stat granted by reaching one level of a skill (wiki skill reward tables):
+     * Farming / Fishing Health +2 (1-14), +3 (15-19), +4 (20-25), +5 (26+); Carpentry Health +1;
+     * Mining Defense, Foraging Strength, Enchanting Intelligence +1 (1-14), +2 (15+). Combat grants Crit Chance (Stats.sheet).
+     */
+    static int statGain(Skill s, int level) {
+        if (level <= 0) {
+            return 0;
+        }
+        return switch (s) {
+            case FARMING, FISHING -> level <= 14 ? 2 : level <= 19 ? 3 : level <= 25 ? 4 : 5;
+            case CARPENTRY -> 1;
+            case MINING, FORAGING, ENCHANTING -> level <= 14 ? 1 : 2;
+            case COMBAT -> 0;
+        };
+    }
+
+    static int statTotal(Skill s, int level) {
+        int total = 0;
+        for (int l = 1; l <= level; l++) {
+            total += statGain(s, l);
+        }
+        return total;
     }
 
     /** Sum of stat perks a profile has earned from skills. */
@@ -128,7 +153,7 @@ final class Skills implements Listener {
                 continue; // Combat perks live in Stats.sheet
             }
             if (s.stat.equals(stat)) {
-                total += level(p, s) * s.statPerLevel;
+                total += statTotal(s, level(p, s));
             }
         }
         return total;
@@ -146,7 +171,7 @@ final class Skills implements Listener {
         for (Collects.Entry entry : Collects.ENTRIES) {
             xp += 4 * ProgressMath.tier(Collects.amount(p, entry));
         }
-        xp += 10 * p.questStep;
+        xp += Quests.SKYBLOCK_XP * p.questStep;
         for (String key : p.discovered) {
             if (!key.contains(":")) {
                 xp += 5;
@@ -169,8 +194,39 @@ final class Skills implements Listener {
         return NamedTextColor.DARK_GRAY;
     }
 
+    /**
+     * Adds XP in tenths (pumpkin is +4.5 Farming). Whole XP goes to the profile and the onchain batch at once;
+     * the leftover tenth stays on the profile until it adds up to a whole point, so the chain value stays an integer.
+     */
+    void addTenths(Player player, Skill skill, long tenths) {
+        if (tenths <= 0) {
+            return;
+        }
+        if (tenths % 10 == 0) {
+            add(player, skill, tenths / 10, null);
+            return;
+        }
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        long whole;
+        synchronized (profile) {
+            long sum = profile.xpTenths[skill.ordinal()] + tenths;
+            whole = sum / 10;
+            profile.xpTenths[skill.ordinal()] = (int) (sum % 10);
+        }
+        String shown = (tenths / 10) + "." + (tenths % 10);
+        if (whole > 0) {
+            add(player, skill, whole, shown);
+        } else {
+            plugin.stats().flash(player, Component.text("+" + shown + " " + skill.label, NamedTextColor.DARK_AQUA), 2000);
+        }
+    }
+
     /** Adds XP to a skill (main thread), flashes the action bar and announces level-ups. */
     void add(Player player, Skill skill, long amount) {
+        add(player, skill, amount, null);
+    }
+
+    private void add(Player player, Skill skill, long amount, String shownAmount) {
         if (amount <= 0) {
             return;
         }
@@ -193,9 +249,9 @@ final class Skills implements Listener {
         } else {
             long from = start(skill, after);
             long to = start(skill, after + 1);
-            progress = String.format("%,d", now - from) + "/" + compact(to - from);
+            progress = String.format(java.util.Locale.ROOT, "%,d", now - from) + "/" + compact(to - from);
         }
-        plugin.stats().flash(player, Component.text("+" + amount + " " + skill.label + " (" + progress + ")", NamedTextColor.DARK_AQUA), 2000);
+        plugin.stats().flash(player, Component.text("+" + (shownAmount != null ? shownAmount : String.valueOf(amount)) + " " + skill.label + " (" + progress + ")", NamedTextColor.DARK_AQUA), 2000);
         plugin.stats().markDirty(player);
         if (after > before) {
             levelUp(player, profile, skill, before, after);
@@ -203,9 +259,9 @@ final class Skills implements Listener {
     }
 
     static String compact(long v) {
-        if (v >= 1_000_000) return (v % 1_000_000 == 0 ? String.valueOf(v / 1_000_000) : String.format("%.1f", v / 1_000_000.0)) + "M";
-        if (v >= 10_000) return (v % 1000 == 0 ? String.valueOf(v / 1000) : String.format("%.1f", v / 1000.0)) + "k";
-        return String.format("%,d", v);
+        if (v >= 1_000_000) return (v % 1_000_000 == 0 ? String.valueOf(v / 1_000_000) : String.format(java.util.Locale.ROOT, "%.1f", v / 1_000_000.0)) + "M";
+        if (v >= 10_000) return (v % 1000 == 0 ? String.valueOf(v / 1000) : String.format(java.util.Locale.ROOT, "%.1f", v / 1000.0)) + "k";
+        return String.format(java.util.Locale.ROOT, "%,d", v);
     }
 
     private void levelUp(Player player, Profile profile, Skill skill, int before, int after) {
@@ -240,14 +296,14 @@ final class Skills implements Listener {
         List<Component> out = new ArrayList<>();
         out.add(Component.text(skill.perk + " " + ProgressMath.numeral(level), NamedTextColor.YELLOW));
         if (skill == Skill.COMBAT) {
+            out.add(Component.text("  Deal ", NamedTextColor.WHITE).append(Component.text((level - 1) * 4 + "➜", NamedTextColor.DARK_GRAY))
+                    .append(Component.text(level * 4 + "%", NamedTextColor.GREEN)).append(Component.text(" more damage to mobs.", NamedTextColor.WHITE)));
             out.add(Component.text("  +0.5% ", NamedTextColor.DARK_GRAY).append(Component.text("☣ Crit Chance", NamedTextColor.BLUE)));
-            out.add(Component.text("  +" + (level - 1) * 2 + "➜" + level * 2 + " ", NamedTextColor.DARK_GRAY).append(Component.text("❤ Health", NamedTextColor.RED)));
-            out.add(Component.text("  +1 ", NamedTextColor.DARK_GRAY).append(Component.text("❁ Strength", NamedTextColor.RED)));
         } else {
-            out.add(Component.text("  +" + (level - 1) * skill.statPerLevel + "➜" + level * skill.statPerLevel + " ", NamedTextColor.DARK_GRAY)
+            out.add(Component.text("  +" + statTotal(skill, level - 1) + "➜" + statTotal(skill, level) + " ", NamedTextColor.DARK_GRAY)
                     .append(Component.text(skill.stat, skill.statColor)));
         }
-        out.add(Component.text("+", NamedTextColor.DARK_GRAY).append(Component.text(String.format("%,d", coinsFor(level)), NamedTextColor.GOLD))
+        out.add(Component.text("+", NamedTextColor.DARK_GRAY).append(Component.text(String.format(java.util.Locale.ROOT, "%,d", coinsFor(level)), NamedTextColor.GOLD))
                 .append(Component.text(" Coins", NamedTextColor.GRAY)));
         out.add(Component.text("+" + sbXpFor(level) + " SkyBlock XP", NamedTextColor.AQUA));
         return out;
@@ -260,12 +316,25 @@ final class Skills implements Listener {
             return;
         }
         Player player = event.getPlayer();
-        add(player, Skill.FISHING, 12);
+        Material caught = event.getCaught() instanceof Item item ? item.getItemStack().getType() : null;
+        add(player, Skill.FISHING, fishingXp(caught));
         long coins = 3 + java.util.concurrent.ThreadLocalRandom.current().nextInt(6);
         plugin.stats().addCoins(player, coins);
         if (event.getCaught() instanceof Item item) {
             Collects.add(plugin, player, item.getItemStack().getType(), item.getItemStack().getAmount());
         }
+    }
+
+    /** Fishing XP by catch (wiki item pages): Raw Cod 25, Pufferfish 50; Salmon / Tropical Fish 25 (provisional); anything else 12 (ours). */
+    static long fishingXp(Material caught) {
+        if (caught == null) {
+            return 12;
+        }
+        return switch (caught) {
+            case COD, SALMON, TROPICAL_FISH -> 25;
+            case PUFFERFISH -> 50;
+            default -> 12;
+        };
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

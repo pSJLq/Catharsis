@@ -534,7 +534,7 @@ final class Minions implements Listener, CommandExecutor {
                 Component.empty(),
                 SbMenu.plain("Time Between Actions: ", NamedTextColor.GRAY).append(SbMenu.plain(DELAY[m.tier] + "s", NamedTextColor.GREEN)),
                 SbMenu.plain("Max Storage: ", NamedTextColor.GRAY).append(SbMenu.plain(String.valueOf(m.capacity()), NamedTextColor.YELLOW)),
-                SbMenu.plain("Resources Generated: ", NamedTextColor.GRAY).append(SbMenu.plain(String.format("%,d", m.generated), NamedTextColor.AQUA)))), null);
+                SbMenu.plain("Resources Generated: ", NamedTextColor.GRAY).append(SbMenu.plain(String.format(java.util.Locale.ROOT, "%,d", m.generated), NamedTextColor.AQUA)))), null);
         view.set(3, SbMenu.icon(Material.REDSTONE_TORCH, SbMenu.plain("Production: ", NamedTextColor.GREEN)
                 .append(m.paused ? SbMenu.plain("PAUSED", NamedTextColor.RED) : SbMenu.plain("RUNNING", NamedTextColor.GREEN)), List.of(
                 SbMenu.plain("Pause or resume this minion.", NamedTextColor.GRAY), Component.empty(), SbMenu.plain("Click to toggle!", NamedTextColor.YELLOW))), c -> {
@@ -596,7 +596,7 @@ final class Minions implements Listener, CommandExecutor {
                     SbMenu.plain("Time Between Actions: ", NamedTextColor.GRAY).append(SbMenu.plain(DELAY[m.tier] + "s ➜ " + DELAY[m.tier + 1] + "s", NamedTextColor.GREEN)),
                     SbMenu.plain("Storage: ", NamedTextColor.GRAY).append(SbMenu.plain(m.capacity() + " ➜ " + Math.min(STORAGE_SLOTS.length, (m.tier + 1) * 3 - 2) * 64, NamedTextColor.YELLOW)),
                     Component.empty(),
-                    SbMenu.plain("Cost: ", NamedTextColor.GRAY).append(SbMenu.plain(String.format("%,d", cost) + " coins", NamedTextColor.GOLD)),
+                    SbMenu.plain("Cost: ", NamedTextColor.GRAY).append(SbMenu.plain(String.format(java.util.Locale.ROOT, "%,d", cost) + " coins", NamedTextColor.GOLD)),
                     SbMenu.plain("Click to upgrade!", NamedTextColor.YELLOW))), c -> {
                         if (plugin.stats().spendCoins(player, cost)) {
                             m.tier++;

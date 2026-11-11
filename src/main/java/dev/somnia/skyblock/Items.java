@@ -13,6 +13,8 @@ import java.util.List;
 final class Items {
     static final String COBBLE = "enchanted_cobble";
     static final String OAK = "enchanted_oak";
+    static final String COBBLE_TEXT = "160 cobblestone pressed into one dense block.";
+    static final String OAK_TEXT = "160 oak logs bound into one heavy bundle.";
 
     private Items() {
     }
@@ -23,7 +25,7 @@ final class Items {
                 Material.COBBLESTONE,
                 COBBLE,
                 "Enchanted Cobblestone",
-                "160 cobblestone compressed into one item."
+                COBBLE_TEXT
         );
     }
 
@@ -33,7 +35,7 @@ final class Items {
                 Material.OAK_LOG,
                 OAK,
                 "Enchanted Oak Log",
-                "160 oak logs compressed into one item."
+                OAK_TEXT
         );
     }
 
@@ -51,13 +53,9 @@ final class Items {
     private static ItemStack enchanted(SomniaSkyblockPlugin plugin, Material material, String id, String name, String lore) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text(name, NamedTextColor.AQUA));
-        meta.lore(List.of(
-                Component.text(lore, NamedTextColor.GRAY),
-                Component.text("SkyBlock purse · Somnia", NamedTextColor.DARK_GRAY)
-        ));
-        meta.setEnchantmentGlintOverride(true);
         meta.getPersistentDataContainer().set(key(plugin), PersistentDataType.STRING, id);
+        Lore.enchanted(meta, name, lore);
+        meta.setEnchantmentGlintOverride(true);
         stack.setItemMeta(meta);
         return stack;
     }
