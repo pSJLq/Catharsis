@@ -37,6 +37,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     private IslandGuide guide;
     private SbAdmin admin;
     private Auth auth;
+    private EventTally tally;
 
     Auth auth() {
         return auth;
@@ -148,6 +149,8 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getCommand("exportkey").setExecutor(keyExport);
         getCommand("exportkey").setTabCompleter(keyExport);
         getServer().getPluginManager().registerEvents(keyExport, this);
+        tally = new EventTally(this);
+        getServer().getPluginManager().registerEvents(tally, this);
 
         getServer().getScheduler().runTask(this, this::startWorld);
     }
@@ -169,6 +172,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         mobs.start();
         arena.start();
         market.start();
+        tally.start();
         getLogger().info("SkyRealm " + (realm.enabled() ? realm.address() : "off") + ": bazaar, auctions, arena VRF, relic pool.");
         long period = Math.max(1, getConfig().getInt("batch-seconds", 4)) * 20L;
         getServer().getScheduler().runTaskTimer(this, () -> {
@@ -185,6 +189,9 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (tally != null) {
+            tally.stop();
+        }
         if (hold != null) {
             hold.saveSandbox();
         }

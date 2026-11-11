@@ -1035,3 +1035,34 @@ html.is-grabbed, html.is-grabbed body { overflow: hidden; }
     transition: none !important;
   }
 }
+
+/* Launch event leaderboard */
+.event .ev-lead { color: #dedede; }
+.ev-head { display: flex; flex-wrap: wrap; gap: 18px; align-items: stretch; margin: 22px 0; }
+.ev-clock { flex: 1 1 260px; border: 2px solid var(--line); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.ev-clock b { font-size: 30px; color: var(--gold); letter-spacing: 0.04em; }
+.ev-clock small { color: var(--muted); }
+.ev-prizes { display: flex; gap: 12px; }
+.ev-prize { border: 2px solid var(--gold); padding: 12px 18px; min-width: 120px; display: flex; flex-direction: column; }
+.ev-prize.second { border-color: #c9c9c9; }
+.ev-prize span { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
+.ev-prize b { font-size: 22px; }
+.ev-stats { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; }
+.ev-stats > div { border: 1px solid var(--line); padding: 10px 14px; display: flex; flex-direction: column; }
+.ev-stats > div > b { font-size: 24px; color: var(--green-line); }
+.ev-stats span { color: var(--muted); font-size: 13px; }
+.ev-types { flex-direction: row !important; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ev-types b { color: #fff; }
+.ev-badge { display: inline-block; margin-left: 8px; padding: 1px 6px; font-size: 12px; border: 1px solid var(--gold); color: var(--gold); }
+.ev-badge.p2 { border-color: #c9c9c9; color: #c9c9c9; }
+.ev-table tr.top1 td { background: rgba(240, 194, 30, 0.08); }
+.ev-table tr.top2 td { background: rgba(201, 201, 201, 0.06); }
+.ev-note, .ev-updated { color: var(--muted); }
+.ev-rules { margin-top: 34px; }
+.ev-rules li { margin: 6px 0; color: #dedede; max-width: 80ch; }
+.ev-admin { margin-top: 30px; border-top: 2px solid var(--line); padding-top: 18px; }
+.ev-admin .ward-form { margin-bottom: 12px; }
+.ev-admin table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ev-admin td, .ev-admin th { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }
+.ev-flag { color: #ff9c5a; display: block; }
+.ev-dq { color: #ff6b6b; }

@@ -176,6 +176,7 @@ final class WalletService {
             lane.next = nonce.add(BigInteger.ONE);
             hash = sent.getTransactionHash();
         }
+        EventTally.tx(profile, to, "withdraw");
         plugin.getLogger().info("Withdraw sent " + hash + " gas limit " + gas + " from " + credentials.getAddress());
         TransactionReceipt receipt;
         try {
@@ -555,6 +556,7 @@ final class WalletService {
             lane.next = lane.next.add(BigInteger.ONE);
             hash = sent.getTransactionHash();
         }
+        EventTally.tx(profile, to, null);
         plugin.getLogger().info("Live sent " + hash + " " + from + " " + to);
         return hash;
     }
@@ -844,6 +846,7 @@ final class WalletService {
             lane.next = nonce.add(BigInteger.ONE);
             hash = sent.getTransactionHash();
         }
+        EventTally.tx(profile, to, null);
         plugin.getLogger().info("Live sent " + hash + " " + credentials.getAddress() + " " + to);
         waitUntilOk(hash);
         return hash;
@@ -1106,6 +1109,7 @@ final class WalletService {
             lane.next = lane.next.add(BigInteger.ONE);
             hash = sent.getTransactionHash();
         }
+        EventTally.tx(profile, to, null);
         plugin.getLogger().info("Realm sent " + hash + " " + function.getName() + " from " + from);
         return hash;
     }
@@ -1148,6 +1152,7 @@ final class WalletService {
             lane.next = lane.next.add(BigInteger.ONE);
             hash = sent.getTransactionHash();
         }
+        EventTally.tx(profile, null, "deploy");
         TransactionReceipt receipt = waitReceipt(hash, 240);
         if (receipt == null || !receipt.isStatusOK() || receipt.getContractAddress() == null) {
             throw new IllegalStateException("Deploy " + hash + " did not land with status 1.");

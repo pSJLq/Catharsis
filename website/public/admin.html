@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#1a1a1a">
   <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
-  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+  <link rel="stylesheet" href="/css/site.css?v=20261112-event">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -44,6 +44,22 @@
           <button class="btn solid gold bare" type="submit">Add dispatch</button>
         </form>
         <div id="ward-list" class="ward-list"></div>
+        <section class="ev-admin" id="ev-admin">
+          <h2>Launch event</h2>
+          <p data-ev-state>Loading…</p>
+          <form id="ev-start" class="ward-form">
+            <label>Start (local time) <input name="start" type="datetime-local"></label>
+            <label>End (local time) <input name="end" type="datetime-local"></label>
+            <button class="btn solid green bare" type="submit">Start event</button>
+            <button class="btn btn-line" type="button" id="ev-stop">Stop event</button>
+          </form>
+          <p><label><input type="checkbox" id="ev-reviewed"> Review done: show results as final</label></p>
+          <p class="ward-note">Empty start = now; empty end = start + 72 hours. Flags are hints for review only; nothing is banned automatically. Disqualified players disappear from the public board.</p>
+          <table>
+            <thead><tr><th>#</th><th>Player</th><th>Levels</th><th>XP</th><th>Tx</th><th>Review</th><th></th></tr></thead>
+            <tbody data-ev-admin-rows></tbody>
+          </table>
+        </section>
         <p><button class="btn btn-line" id="ward-out" type="button">Leave</button></p>
       </div>
       <p class="ward-note" data-ward-note></p>
@@ -52,5 +68,6 @@
   <!--layout:footer-->
   <script src="/js/site.js?v=20261109-hall4"></script>
   <script src="/js/admin.js?v=20261109-hall4"></script>
+  <script src="/js/admin-event.js?v=20261112-event"></script>
 </body>
 </html>

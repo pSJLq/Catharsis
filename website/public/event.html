@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Launch event · Catharsis</title>
+  <meta name="description" content="The Catharsis launch event leaderboard: SkyBlock levels gained since the start, onchain transactions, prizes and rules.">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="stylesheet" href="/css/site.css?v=20261112-event">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <!--layout:header-->
+  <main id="main" class="sheet event">
+    <div class="wrap">
+      <h1>Launch event</h1>
+      <p class="ev-lead">Climb the SkyBlock Level ladder on the Somnia testnet. Only the levels you gain after the start count; new players start from zero.</p>
+      <div class="ev-head">
+        <div class="ev-clock"><span data-ev-phase>Loading…</span><b data-ev-count></b><small data-ev-window></small></div>
+        <div class="ev-prizes">
+          <div class="ev-prize first"><span>1st</span><b>100 SOMI</b></div>
+          <div class="ev-prize second"><span>2nd</span><b>50 SOMI</b></div>
+        </div>
+      </div>
+      <div class="ev-stats">
+        <div><b data-ev-tx>0</b><span>onchain transactions by players</span></div>
+        <div><b data-ev-players>0</b><span>players since the start</span></div>
+        <div class="ev-types" data-ev-types></div>
+      </div>
+      <p class="ev-note" data-ev-note></p>
+      <table class="ev-table">
+        <thead><tr><th>#</th><th>Player</th><th>Levels gained</th><th>SkyBlock XP gained</th><th>Level now</th><th>Transactions</th></tr></thead>
+        <tbody data-ev-rows><tr><td colspan="6">No results yet.</td></tr></tbody>
+      </table>
+      <p class="ev-updated" data-ev-updated></p>
+
+      <section class="ev-rules" id="rules">
+        <h2>Event rules</h2>
+        <ul>
+          <li>The ranking is by SkyBlock Level gained between the start and the end of the event. Ties go to more SkyBlock XP gained.</li>
+          <li>Prizes: 1st place 100 SOMI, 2nd place 50 SOMI, paid to the purse of the winning account after the event.</li>
+          <li>Abusing a bug or exploit, botting, macros or auto-clickers, and playing several accounts (multi-accounting) lead to disqualification.</li>
+          <li>Found a bug? Report it instead of using it. Useful reports are credited.</li>
+          <li>Unusual activity is reviewed by hand before prizes are paid; nobody is banned automatically. The standings are provisional until that review is done.</li>
+          <li>Staff and test accounts are not ranked.</li>
+          <li>This is a testnet event. Testnet tokens and items have no value.</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+  <!--layout:footer-->
+  <script src="/js/site.js?v=20261109-hall4"></script>
+  <script src="/js/event.js?v=20261112-event"></script>
+</body>
+</html>

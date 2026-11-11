@@ -53,3 +53,7 @@ Thumbs.db
 # Local JDK / Gradle paths
 local.properties
 gradle.properties.local
+
+# Event leaderboard runtime state (player data)
+website/data/event.json
+website/data/event.json.tmp

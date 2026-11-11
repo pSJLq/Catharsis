@@ -70,7 +70,7 @@ function readRaw(req, limit) {
   });
 }
 
-function readBody(req) {
+export function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -118,7 +118,7 @@ function cookieToken(req) {
   return match ? match[1] : '';
 }
 
-function authed(req) {
+export function authed(req) {
   const token = cookieToken(req);
   const row = sessions.get(token);
   if (!row) return false;
@@ -129,7 +129,7 @@ function authed(req) {
   return true;
 }
 
-function originOk(req) {
+export function originOk(req) {
   return (req.headers.origin || '') === 'http://127.0.0.1:8791';
 }
 

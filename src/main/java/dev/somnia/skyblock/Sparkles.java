@@ -55,6 +55,9 @@ final class Sparkles {
 
     void regrow(Block block) {
         World world = block.getWorld();
+        if (!HubManager.WORLD_NAME.equals(world.getName())) {
+            return; // spirit, END_ROD trail and burst are hub-only; private islands regrow without the visual
+        }
         Location target = block.getLocation().add(0.5, 0.5, 0.5);
         if (world.getNearbyPlayers(target, 48).isEmpty()) {
             return; // nobody to see it

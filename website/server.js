@@ -5,7 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { applyLayout } from './layout.js';
 import { handleExplorer } from '../explorer/server.js';
-import { handleWard } from './ward.js';
+import { handleWard, authed, originOk, readBody } from './ward.js';
+import { handleEvent } from './event.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const port = 8791;
@@ -84,6 +85,7 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
+    if (await handleEvent(req, res, url.pathname, { authed, originOk, readBody })) return;
     if (await handleWard(req, res, url.pathname)) return;
     if (await handleExplorer(req, res, url.pathname)) return;
     if (url.pathname === '/api/join') {
