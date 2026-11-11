@@ -1,0 +1,38 @@
+batch-seconds: 4
+chain:
+  enabled: true
+  rpc: "https://api.infra.testnet.somnia.network"
+  # Tried in order when the main RPC fails or is rate-limited (all must serve chain id 50312).
+  rpc-fallbacks:
+    - "https://dream-rpc.somnia.network"
+    - "https://rpc.ankr.com/somnia_testnet"
+    - "https://50312.rpc.thirdweb.com"
+  chain-id: 50312
+  profile-contract: "0xeB97b719A39722D678418a0f87e6f5bEd8016bA0"
+  hold-contract: "0x26cf755903bA760d90363d5a74C9e877259603F3"
+  gear-contract: "0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8"
+  word-contract: "0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c"
+  aotv-contract: "0x378D4201ce775263f101EB5eC4A63d2E5d669c24"
+  realm-contract: "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d"
+  bin-contract: "0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638"
+  # skills-contract: set to the live SkySkills2 address after deploy
+  skills-contract-v1: "0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a"
+  gas-limit: 8000000
+  max-fee-gwei: 20         # cap; the fee itself follows eth_gasPrice (+ a safety margin)
+
+# Login with a limbo (Auth). Purse keys are sealed with the player's password (Argon2id + AES-256-GCM).
+auth:
+  session-hours: 0         # 0 = /login on every join (sessions by name + IP only once a proxy passes the real IP)
+  max-accounts-per-ip: 2   # new purses registered per IP (0 = no limit)
+  timeout-seconds: 60      # kick if not logged in by then
+  max-attempts: 5          # wrong passwords before a lockout and kick
+  lockout-minutes: 15
+  min-password-length: 8
+  argon2:
+    memory-kb: 65536
+    iterations: 3
+    lanes: 1
+
+# Accounts that may use /dev (op + admin for one session, only after /login).
+# Leave empty in this repository. Set names on your own server.
+dev-accounts: []

@@ -1,0 +1,16 @@
+{
+  "chainId": 50312,
+  "rpc": "https://api.infra.testnet.somnia.network",
+  "island": "0xeB97b719A39722D678418a0f87e6f5bEd8016bA0",
+  "hold": "0x26cf755903bA760d90363d5a74C9e877259603F3",
+  "gear": "0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8",
+  "purse": "0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6",
+  "migration": "0xf1e5143c957a252f69f63835f8046fb58725586ce9b4fe7e2ece7f9eec131c17",
+  "word": "0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c",
+  "aotv": "0x378D4201ce775263f101EB5eC4A63d2E5d669c24",
+  "wordMigration": "0xf573164b6ee8190e32daef0dfe83c91c36877e8d964f135de11420cff2f12972",
+  "realm": "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d",
+  "realmTx": "0x0ac27a291a8ae45c7b9126024ea7be8006ba2f2a773797af67b52e4f52b09eca",
+  "bin": "0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638",
+  "binTx": "0x9d7b91fc232f41aa5967adefe210c1595a52e5c82652387870c1e8bf3c52446e"
+}

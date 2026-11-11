@@ -1,0 +1,52 @@
+{
+  "items": [
+    {
+      "id": "nmw8u5nx2a94548",
+      "tag": "Post",
+      "title": "Just ran minecraft in a browser",
+      "blurb": "Just ran minecraft in the browser instead of gta 5 :D What do you know about Chunked?",
+      "image": "/img/news/e5afc95b50d9f5fc.png",
+      "href": "https://x.com/ShinyViq/status/2119397893152911853"
+    },
+    {
+      "id": "nmw8tfvvqdafe3d",
+      "tag": "Post",
+      "title": "Already testing",
+      "blurb": "In the demo, I harvest wheat, craft tools and place blocks while the transactions appear beside the game. The dashboard reads the inventory directly from the blockchain, so you can watch both stay in sync.",
+      "image": "/img/news/12223d4d562f845d.png",
+      "href": "https://x.com/ShinyViq/status/2119035503764762661"
+    },
+    {
+      "id": "nisland",
+      "tag": "World",
+      "title": "The shared island is open in this browser",
+      "blurb": "Press Play, type your name inside the game, and you are on the one island. Movement stays on the server.",
+      "image": "/img/day.jpg",
+      "href": "/#world"
+    },
+    {
+      "id": "nchain",
+      "tag": "Chain",
+      "title": "Collections settle on Shannon",
+      "blurb": "Cobble, oak, and wheat count up after the block. Crafts, invites, and spells follow the same receipts.",
+      "image": "/img/field.jpg",
+      "href": "/guide"
+    },
+    {
+      "id": "ncatacombs",
+      "tag": "Soon",
+      "title": "Catacombs are drawn, not open",
+      "blurb": "The stairs under the stone are on the page. The floors are not a place you can enter.",
+      "image": "/img/catacombs.jpg",
+      "href": ""
+    },
+    {
+      "id": "ncaves",
+      "tag": "Soon",
+      "title": "The caves stay shut",
+      "blurb": "Pale ore in a narrow tunnel. Mining that is not the cobble generator is not on this world yet.",
+      "image": "/img/caves.jpg",
+      "href": ""
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Explorer · Catharsis</title>
+  <meta name="description" content="Recent game actions from Catharsis on Shannon: gathering, crafting, invites, and spells.">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
+  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <!--layout:header-->
+  <main id="main" class="xpl">
+    <div class="wrap">
+      <h1>Game explorer</h1>
+      <p class="sub">Recent actions this world wrote on Shannon. Search a transaction, an address, or a word such as craft. This page only reads.</p>
+      <form id="x-search" class="xpl-search" role="search">
+        <label class="sr" for="x-q">Search</label>
+        <input id="x-q" type="search" placeholder="Transaction, address, or action" autocomplete="off">
+        <button class="btn solid green" type="submit">Search</button>
+      </form>
+      <div id="x-stats" class="xpl-stats"></div>
+      <div id="x-contracts" class="xpl-contracts"></div>
+      <div id="x-view"></div>
+    </div>
+  </main>
+  <!--layout:footer-->
+  <script src="/js/site.js?v=20261109-hall4"></script>
+  <script src="/js/explore.js?v=20261109-hall4"></script>
+</body>
+</html>

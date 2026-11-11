@@ -1,0 +1,55 @@
+# Build and tooling
+build/
+.gradle/
+out/
+target/
+*.class
+contracts/out/
+contracts/cache/
+cache/
+broadcast/
+
+# Secrets and local config — never commit these
+.env
+.env.*
+!.env.example
+secrets.yml
+*.pem
+*.key
+*.p12
+*.jks
+auth.json
+**/auth.json
+wallet.json
+mnemonic.txt
+dev-accounts
+
+# Runtime, worlds, backups, logs
+server/
+backups/
+logs/
+*.log
+players/
+world/
+worlds/
+*.sbh
+*.schem
+*.schematic
+
+# Dependencies and vendor binaries
+node_modules/
+tools/
+*.jar
+!src/main/resources/*.bin
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Local JDK / Gradle paths
+local.properties
+gradle.properties.local

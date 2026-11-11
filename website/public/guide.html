@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guide · Catharsis</title>
+  <meta name="description" content="How Catharsis works: the shared island, the bag, collections, crafts, spells, and the places that are still shut.">
+  <link rel="canonical" href="http://127.0.0.1:8791/guide">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
+  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <!--layout:header-->
+  <main id="main" class="guide">
+    <div class="wrap">
+      <p class="soon">Field notes</p>
+      <h1>How this world works</h1>
+      <p class="lede">One shared island, played in this browser. Breaks, crafts, and spells settle on Shannon. The other places on the menu are drawings.</p>
+
+      <section class="guide-block">
+        <figure>
+          <img src="/img/day.jpg" alt="The grass island with an oak and a lantern, in daylight">
+        </figure>
+        <div>
+          <h2>One island</h2>
+          <p>Everyone who presses Play stands on the same plot. Grass, a tree, wheat, and a cobblestone generator. There is no private island yet, and no hub to walk to.</p>
+          <p>The page does not ask for a name. You type it inside the game, after the world has loaded. Whoever is playing signs with their own name.</p>
+        </div>
+      </section>
+
+      <section class="guide-block flip">
+        <figure>
+          <img src="/img/field.jpg" alt="Wheat, grass, and the cobblestone generator on the island">
+        </figure>
+        <div>
+          <h2>What never leaves the server</h2>
+          <p>Walking, looking, and the tick of the world stay on the machine that hosts the game. The chain does not store your position.</p>
+          <p>A block you break still lands in the game inventory at once. The chain hears about cobble, oak, and wheat a few seconds later.</p>
+        </div>
+      </section>
+
+      <section class="guide-block">
+        <figure>
+          <img src="/img/field.jpg" alt="The wheat field on the island" style="object-position: 60% 40%;">
+        </figure>
+        <div>
+          <h2>Collections</h2>
+          <p>SkyIsland keeps a deed for the island and lifetime counters: mining, foraging, and farming experience, plus how much cobble, oak, and wheat you have ever gathered. It does not keep the live stacks in your bag.</p>
+          <p>About every four seconds the wallet calls <code>applyBatch</code>. That call counts generator cobblestone, oak logs, and fully grown wheat. Dirt and the other vanilla drops never enter that batch.</p>
+          <p>The counters do not fall when you drop the items, store them, or craft them into something else. They are a record of what you gathered, not what you are holding.</p>
+        </div>
+      </section>
+
+      <section class="guide-block flip">
+        <figure>
+          <img src="/img/day.jpg" alt="The oak on the island" style="object-position: 30% 45%;">
+        </figure>
+        <div>
+          <h2>Enchanted crafts</h2>
+          <p><code>/craft cobble</code> and <code>/craft oak</code> are their own recipes. They are not the crafting table.</p>
+          <p>The contract asks for a collection of at least 100 in that material. The game then takes 160 plain stacks and gives one enchanted cobblestone, or one enchanted oak log. The enchanted piece sits in the bag like any other stack. It is not its own token.</p>
+          <p>Turning a log into planks is vanilla. One oak log becomes four oak planks, the collection does not change, and the chain does not treat that grid as a recipe. The crafting grid is outside the bag snapshot, so finish the craft before you walk away.</p>
+        </div>
+      </section>
+
+      <section class="guide-block">
+        <figure>
+          <img src="/img/caves.jpg" alt="A dark rock tunnel">
+        </figure>
+        <div>
+          <h2>The bag</h2>
+          <p>SkyHold stores cells: an item id, a count, and a damage value. The bag has 41 slots. A chest has 54. A normal stack stops at 64. Ten dirt is one cell, not ten tokens.</p>
+          <p>Item ids are a hash of the Minecraft name. Tools and armor that are unique keep their traits on the gear contract: name, reforge, enchants. A plain stack does not.</p>
+          <p>The wallet signs when the stored slots change: a drop, a place, a chest, a pickup, a craft. Gas for that signature is STT on Shannon. STT is not an item in the bag. Creative mode does not sign. <code>/gamemode survival</code> puts the chain bag back.</p>
+        </div>
+      </section>
+
+      <section class="guide-block flip">
+        <figure>
+          <img src="/img/day.jpg" alt="The lantern on the island" style="object-position: 80% 30%;">
+        </figure>
+        <div>
+          <h2>Tools do not wear</h2>
+          <p>Tools, armor, and other damageable items do not lose durability, and they do not break. That is the plugin, not a world rule. A fresh login writes damage back to zero if a cell still carried wear.</p>
+        </div>
+      </section>
+
+      <section class="guide-block">
+        <figure>
+          <img src="/img/ledge.jpg" alt="Two hooded figures and a pale hound on a stone ledge">
+        </figure>
+        <div>
+          <h2>Words and the void sword</h2>
+          <p>Spell words and mana for the wallet player live on the Word contract. Aspect of the Void is its own token: a sword with a blink. The guide does not print the spell lines. The explorer shows the receipt after a spell is cast, not the wording.</p>
+        </div>
+      </section>
+
+      <section class="guide-block flip">
+        <figure>
+          <img src="/img/hub.jpg" alt="A stone plaza and a dead tree on a floating island">
+        </figure>
+        <div>
+          <h2>Places that are still shut</h2>
+          <p><span class="soon">Soon</span></p>
+          <p>Island, as a private plot, is not split off from the shared world. The hub plaza, the catacomb floors, and the ore caves are pictures. None of them has a door, and none of them has a Play button.</p>
+          <p>The contracts behind the live loop are listed on the <a href="/contracts">contracts</a> page. Recent receipts are on the <a href="/explore">game explorer</a>. The same transactions sit on the public Shannon explorer.</p>
+        </div>
+      </section>
+
+      <section class="guide-trio">
+        <article>
+          <img src="/img/catacombs.jpg" alt="Stone stairs under hanging roots, with a green lantern">
+          <h3>Catacombs</h3>
+          <p>Drawn. Not a run you can enter.</p>
+        </article>
+        <article>
+          <img src="/img/hub.jpg" alt="The unbuilt hub plaza">
+          <h3>Hub</h3>
+          <p>A meeting place that is not built.</p>
+        </article>
+        <article>
+          <img src="/img/caves.jpg" alt="The unopened cave">
+          <h3>Caves</h3>
+          <p>Ore that is not the generator.</p>
+        </article>
+      </section>
+    </div>
+  </main>
+  <!--layout:footer-->
+  <script src="/js/site.js?v=20261109-hall4"></script>
+</body>
+</html>

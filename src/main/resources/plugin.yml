@@ -1,0 +1,100 @@
+name: SomniaSkyblock
+version: '${version}'
+main: dev.somnia.skyblock.SomniaSkyblockPlugin
+load: STARTUP
+api-version: '26.3'
+authors: [somnia]
+description: SkyBlock island with a personal Somnia purse
+commands:
+  register:
+    description: Create your account (sets the password that locks your purse)
+    usage: /register <password> <password>
+    aliases: [reg]
+  login:
+    description: Log in
+    usage: /login <password>
+    aliases: [l]
+  dev:
+    description: Dev mode (dev accounts only, after /login)
+    usage: /dev
+    aliases: [devmode]
+  user:
+    description: Back to user mode
+    usage: /user
+    aliases: [usermode]
+  changepassword:
+    description: Change your password
+    usage: /changepassword <old> <new>
+  sb:
+    description: SkyBlock menu
+    usage: /sb
+  island:
+    description: Return to your island
+    usage: /island
+    aliases: [is, home]
+  hub:
+    description: Go to the hub
+    usage: /hub
+  craft:
+    description: Compress a resource into an enchanted item
+    usage: /craft cobble|oak|void
+  deposit:
+    description: Show your purse address
+    usage: /deposit
+  withdraw:
+    description: Send STT from your purse
+    usage: /withdraw <amount> <address>
+  trade:
+    description: Trade items with another player
+    usage: /trade <player>
+  bazaar:
+    description: Bazaar (STT market on Somnia)
+    usage: /bz [sell|order|cancel|orders|claim] ...
+    aliases: [bz]
+  auction:
+    description: Auction House (STT escrow on Somnia)
+    usage: /ah [sell <start stt> [minutes]]
+    aliases: [ah]
+  arena:
+    description: Colosseum arena waves
+    usage: /arena [leave]
+  stats:
+    description: Your combat stats
+    usage: /stats
+  relic:
+    description: Relic Pool bank
+    usage: /relic
+  quest:
+    description: Hub quest path
+    usage: /quest
+    aliases: [quests]
+  sbmenu:
+    description: Open the SkyBlock Menu
+    usage: /sbmenu
+    aliases: [menu, sbm]
+  skills:
+    description: Your skills
+    usage: /skills
+  collection:
+    description: Your collections
+    usage: /collection
+    aliases: [collections]
+  calendar:
+    description: SkyBlock calendar and events
+    usage: /calendar
+  warp:
+    description: Fast travel
+    usage: /warp
+  sbadmin:
+    description: Admin - clean stop, save-off/save-on for backups, status
+    usage: /sbadmin <stop|save-off|save-on|save|status|unregister <name>|deploy-skills2|reset-skills <name>>
+    permission: somnia.admin
+  minion:
+    description: Place or list your minions
+    usage: /minion [place]
+    aliases: [minions]
+
+permissions:
+  somnia.admin:
+    description: /sbadmin (stop, save-off, save-on)
+    default: op

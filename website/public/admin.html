@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ward · Catharsis</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <!--layout:header-->
+  <main id="main" class="sheet ward">
+    <div class="wrap">
+      <h1>Ward</h1>
+      <p>Dispatches for the front page. This door is only on this computer.</p>
+      <form id="ward-login" class="ward-form">
+        <label>Name <input name="name" autocomplete="username" required></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="btn solid green bare" type="submit">Enter</button>
+      </form>
+      <div id="ward-desk" hidden>
+        <form id="ward-add" class="ward-form">
+          <label>Tag <input name="tag" maxlength="24" placeholder="World"></label>
+          <label>Title <input name="title" maxlength="90" required></label>
+          <label>Text <textarea name="blurb" maxlength="240" required></textarea></label>
+          <label>Picture already on the site
+            <select name="image">
+              <option value="/img/day.jpg">Island, day</option>
+              <option value="/img/field.jpg">Island, field</option>
+              <option value="/img/hub.jpg">Hub</option>
+              <option value="/img/catacombs.jpg">Catacombs</option>
+              <option value="/img/caves.jpg">Caves</option>
+              <option value="/img/ledge.jpg">Ledge</option>
+            </select>
+          </label>
+          <label>Or upload your own
+            <input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+          </label>
+          <label>Link <input name="href" placeholder="/guide" maxlength="180"></label>
+          <button class="btn solid gold bare" type="submit">Add dispatch</button>
+        </form>
+        <div id="ward-list" class="ward-list"></div>
+        <p><button class="btn btn-line" id="ward-out" type="button">Leave</button></p>
+      </div>
+      <p class="ward-note" data-ward-note></p>
+    </div>
+  </main>
+  <!--layout:footer-->
+  <script src="/js/site.js?v=20261109-hall4"></script>
+  <script src="/js/admin.js?v=20261109-hall4"></script>
+</body>
+</html>

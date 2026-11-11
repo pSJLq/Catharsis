@@ -1,0 +1,9 @@
+{
+  "name": "catharsis-deploy",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "solc": "^0.8.28"
+  }
+}

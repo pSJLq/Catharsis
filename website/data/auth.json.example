@@ -1,0 +1,9 @@
+{
+  "name": "admin",
+  "salt": "REPLACE_WITH_HEX_SALT",
+  "hash": "REPLACE_WITH_SCRYPT_HASH",
+  "n": 16384,
+  "r": 8,
+  "p": 1,
+  "keylen": 32
+}

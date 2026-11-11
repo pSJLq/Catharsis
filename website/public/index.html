@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catharsis</title>
+  <meta name="description" content="Catharsis is a skyblock you play in the browser. One island, and the actions settle on Shannon.">
+  <link rel="canonical" href="http://127.0.0.1:8791/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Catharsis">
+  <meta property="og:description" content="Catharsis is a skyblock you play in the browser. One island, and the actions settle on Shannon.">
+  <meta property="og:url" content="http://127.0.0.1:8791/">
+  <meta property="og:image" content="http://127.0.0.1:8791/img/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#1a1a1a">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
+  <link rel="apple-touch-icon" href="/img/favicon-192.png">
+  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <!--layout:header-->
+  <main id="main">
+    <section class="hero">
+      <img class="hero-bg" src="/img/day.jpg" alt="A floating grass island with an oak tree and a lantern, in daylight">
+      <div class="hero-shade" aria-hidden="true"></div>
+      <div class="hero-copy">
+        <h1>One island in the void</h1>
+        <p class="lede">Press Play, choose your name in the game, and you are already on this world. The page address stays where it is.</p>
+        <div class="actions">
+          <button class="btn" type="button" data-launch>
+            <span class="spin" aria-hidden="true"></span>
+            <span data-label>Play</span>
+          </button>
+          <p class="status" data-status><span class="dot" aria-hidden="true"></span> <span data-status-label>Checking the world</span></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="play" aria-label="Game">
+      <div class="wrap">
+        <h2>Play here</h2>
+        <p class="sub">The world opens in this window. Full screen covers the game, not the whole site.</p>
+        <div class="stage" data-stage>
+          <div class="stage-bar">
+            <span>Catharsis</span>
+            <button class="stage-full" type="button" data-fullscreen>Full screen</button>
+          </div>
+          <div class="stage-frame">
+            <iframe data-frame title="Catharsis" tabindex="0" allow="fullscreen; autoplay; gamepad; keyboard-map" referrerpolicy="same-origin"></iframe>
+            <div class="stage-poster">
+              <img src="/img/day.jpg" alt="">
+              <button class="btn" type="button" data-launch>
+                <span class="spin" aria-hidden="true"></span>
+                <span data-label>Play</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="world" aria-labelledby="world-title">
+      <div class="wrap split">
+        <img src="/img/field.jpg" alt="Grass, wheat, and a cobblestone generator on the island, in daylight">
+        <div>
+          <h2 id="world-title">The island</h2>
+          <p>The world is already selected. Your name is typed inside the game, not on this page.</p>
+          <p>Breaks, crafts, and spells settle on Shannon. Movement stays on the server.</p>
+          <a class="btn" href="/explore">Game explorer</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="band news-band" id="news" aria-labelledby="news-title">
+      <div class="wrap news-layout">
+        <div class="news-copy">
+          <h2 id="news-title">What's new in Catharsis</h2>
+          <p>Dispatches from this island. The sealed ones stay dark until the floor opens.</p>
+          <p><a href="/guide">Read the guide</a></p>
+          <div class="news-arrows">
+            <button type="button" data-news="prev" aria-label="Previous dispatch">←</button>
+            <button type="button" data-news="next" aria-label="Next dispatch">→</button>
+          </div>
+        </div>
+        <div class="news-window">
+          <div class="news-veil" aria-hidden="true"></div>
+          <div class="news-track" data-news-track></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="motion" aria-label="The island drifting">
+      <img src="/img/field.jpg" alt="The island drifting past wheat, cobble, and a lantern">
+    </section>
+
+    <section class="band faq" id="questions">
+      <div class="wrap">
+        <h2>Questions</h2>
+        <div class="faq-list">
+          <details>
+            <summary>How do I play?</summary>
+            <p>Press Play. When the game finishes loading, click Done inside it. Click the window once so the mouse and keyboard stay in the game. Esc gives the cursor back.</p>
+          </details>
+          <details>
+            <summary>Where do I type my name?</summary>
+            <p>Inside the game. This page does not have a name field, and it does not store the name you choose.</p>
+          </details>
+          <details>
+            <summary>Can a friend join?</summary>
+            <p>Open this page on this computer and press Play. Everyone on this world shares the one island.</p>
+          </details>
+          <details>
+            <summary>What is the explorer?</summary>
+            <p>A list of recent game actions on Shannon: gathering, crafting, invites, and spells. It does not sign anything.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+  <!--layout:footer-->
+  <script src="/js/site.js?v=20261109-hall4"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play · Somnia SkyBlock</title>
+  <meta name="description" content="Enter a username and open the browser client already aimed at the Somnia SkyBlock server.">
+  <link rel="canonical" href="http://127.0.0.1:8791/play">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Play · Somnia SkyBlock">
+  <meta property="og:description" content="Enter a username and open the browser client already aimed at the Somnia SkyBlock server.">
+  <meta property="og:url" content="http://127.0.0.1:8791/play">
+  <meta property="og:image" content="http://127.0.0.1:8791/img/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#070908">
+  <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
+  <link rel="apple-touch-icon" href="/img/favicon-192.png">
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="veil"></div>
+  <header class="nav">
+    <a class="brand" href="/">
+      <img src="/img/emblem.jpg" width="36" height="36" alt="Somnia SkyBlock island mark">
+      <span>Somnia SkyBlock</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/privacy">Privacy</a>
+      <a class="nav-play" href="/play" aria-current="page">Play</a>
+    </nav>
+  </header>
+  <main id="main" class="page-hero">
+    <img class="page-bg" src="/img/hero.jpg" alt="A floating grass island with an oak tree and a lantern, hanging in a dark sky">
+    <section class="sheet" aria-labelledby="play-title">
+      <p class="eyebrow">Browser client</p>
+      <h1 id="play-title">Play</h1>
+      <p class="lede">Type the name you want on the island. The client opens with the server address already set.</p>
+      <form data-play-form>
+        <label class="field">
+          <span>Username</span>
+          <input type="text" name="nick" autocomplete="nickname" maxlength="16" spellcheck="false" required placeholder="Steve">
+        </label>
+        <label class="field">
+          <span>Server</span>
+          <input type="text" name="join" data-join value="ws://127.0.0.1:25565" readonly>
+        </label>
+        <p class="form-error" data-error role="alert"></p>
+        <button class="btn" type="submit">
+          <span class="spin" aria-hidden="true"></span>
+          <span data-label>Play</span>
+        </button>
+      </form>
+      <p class="status" data-status><span class="dot" aria-hidden="true"></span> <span data-status-label>Checking the world</span></p>
+      <p class="fine">On this computer the game uses <span data-local>ws://127.0.0.1:25565</span>. Friends on this network use <span data-lan>the address shown at home</span>.</p>
+    </section>
+  </main>
+  <script src="/js/site.js"></script>
+</body>
+</html>
