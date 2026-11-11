@@ -79,6 +79,10 @@ commands:
     description: Your collections
     usage: /collection
     aliases: [collections]
+  levels:
+    description: SkyBlock Leveling
+    usage: /levels
+    aliases: [sblevels]
   calendar:
     description: SkyBlock calendar and events
     usage: /calendar

@@ -101,7 +101,7 @@ final class WordChain implements Listener {
         NamespacedKey key = recipeKey();
         if (Bukkit.getRecipe(key) == null) {
             ShapelessRecipe recipe = new ShapelessRecipe(key, voidResult());
-            recipe.addIngredient(new RecipeChoice.ExactChoice(new ItemStack(Material.COBBLESTONE)));
+            recipe.addIngredient(new RecipeChoice.MaterialChoice(Material.COBBLESTONE)); // cobble carries SkyBlock lore now
             Bukkit.addRecipe(recipe);
         }
     }
@@ -169,7 +169,7 @@ final class WordChain implements Listener {
         int left = have - 1;
         preview[from] = left <= 0 ? ZERO : stackWord(COBBLE, left);
         paint(player, preview);
-        tell(player, "Signing Aspect of the Void.", NamedTextColor.GRAY);
+        tell(player, "Signing the Voidstep Blade.", NamedTextColor.GRAY);
         UUID id = player.getUniqueId();
         Profile profile = plugin.profiles().get(id);
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -214,12 +214,41 @@ final class WordChain implements Listener {
     }
 
     void commitLocal(Player player) {
+        commitLocal(player, null);
+    }
+
+    /**
+     * Signs the live bag, then tells {@code hook} whether the write landed (true) or was rolled back (false).
+     * Sinks that pay out (merchant sales) grant the reward only after the bag update lands.
+     */
+    void commitLocal(Player player, java.util.function.Consumer<Boolean> hook) {
         Seat seat = seats.get(player.getUniqueId());
         if (seat == null || !seat.loaded || plugin.hold().offchain(player)) {
+            if (hook != null) {
+                hook.accept(true);
+            }
             return;
+        }
+        if (hook != null) {
+            seat.hooks.add(hook);
         }
         seat.trustLocal = true;
         schedule(player);
+    }
+
+    private void resolveHooks(Seat seat, boolean ok) {
+        List<java.util.function.Consumer<Boolean>> done = seat.flying;
+        seat.flying = null;
+        if (done == null) {
+            return;
+        }
+        for (java.util.function.Consumer<Boolean> hook : done) {
+            try {
+                hook.accept(ok);
+            } catch (RuntimeException exception) {
+                plugin.getLogger().warning("Bag hook failed: " + exception);
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -480,7 +509,7 @@ final class WordChain implements Listener {
         if (plugin.stats() != null) {
             plugin.stats().chainMana(player, manaNow(seat), MAX_MANA);
             plugin.stats().flash(player, Component.text("-" + MANA_COST + " Mana (", NamedTextColor.AQUA)
-                    .append(Component.text("Instant Transmission", NamedTextColor.GOLD)).append(Component.text(")", NamedTextColor.AQUA)), 1500);
+                    .append(Component.text("Void Step", NamedTextColor.GOLD)).append(Component.text(")", NamedTextColor.AQUA)), 1500);
         } else {
             player.sendActionBar(Component.text("Mana " + manaNow(seat) + "/" + MAX_MANA, NamedTextColor.AQUA));
         }
@@ -781,6 +810,13 @@ final class WordChain implements Listener {
         BigInteger[] target = liveWords(player);
         seat.trusted = null;
         seat.trustLocal = false;
+        if (!seat.hooks.isEmpty()) {
+            if (seat.flying == null) {
+                seat.flying = new ArrayList<>();
+            }
+            seat.flying.addAll(seat.hooks);
+            seat.hooks.clear();
+        }
         List<PendingBreak> breaks = new ArrayList<>(seat.breaks);
         List<PendingPlace> places = new ArrayList<>(seat.places);
         List<PendingDrop> drops = new ArrayList<>(seat.drops);
@@ -792,9 +828,13 @@ final class WordChain implements Listener {
                 finishLayout(player.getUniqueId(), target, List.of(), 0, null, breaks, places, drops, true);
             }
             seat.trustFails = 0;
+            resolveHooks(seat, true);
             return;
         }
         sendLayout(player, seat, target, breaks, places, drops, true);
+        if (!seat.bagBusy) {
+            resolveHooks(seat, true); // nothing to sign after all
+        }
     }
 
     private void sendClick(Player player, Seat seat) {
@@ -896,6 +936,10 @@ final class WordChain implements Listener {
                 applyBatch(seat.words, batches.get(i));
             }
             seat.trustFails++;
+            if (seat.flying != null) {
+                seat.hooks.addAll(0, seat.flying);
+                seat.flying = null;
+            }
             seat.breaks.addAll(0, breaks);
             seat.places.addAll(0, places);
             seat.drops.addAll(0, drops);
@@ -916,6 +960,7 @@ final class WordChain implements Listener {
                 seat.trustLocal = false;
             }
             seat.trustFails = 0;
+            resolveHooks(seat, done >= batches.size());
         }
         for (PendingBreak pending : breaks) {
             seat.held.remove(pending.key);
@@ -1055,10 +1100,10 @@ final class WordChain implements Listener {
             BigInteger[] live = liveWords(player);
             live[to] = aotvWord(serial);
             paint(player, live);
-            tell(player, "Aspect of the Void #" + serial + ".", NamedTextColor.DARK_PURPLE);
+            tell(player, "Voidstep Blade #" + serial + ".", NamedTextColor.DARK_PURPLE);
         } else if (player != null && !plugin.hold().offchain(player)) {
             paint(player, seat.words);
-            tell(player, "Aspect of the Void #" + serial + ".", NamedTextColor.DARK_PURPLE);
+            tell(player, "Voidstep Blade #" + serial + ".", NamedTextColor.DARK_PURPLE);
         }
         if (player != null && (seat.again || seat.trustLocal || !seat.breaks.isEmpty() || seat.trusted != null)) {
             schedule(player);
@@ -1575,15 +1620,21 @@ final class WordChain implements Listener {
     private ItemStack aspect(long serial) {
         ItemStack stack = new ItemStack(Material.NETHERITE_SWORD);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text("Aspect of the Void", NamedTextColor.DARK_PURPLE));
+        meta.displayName(Lore.plain("Voidstep Blade", NamedTextColor.DARK_PURPLE));
         meta.lore(List.of(
-                Component.text("Damage +120", NamedTextColor.GRAY),
-                Component.text("Strength +100", NamedTextColor.GRAY),
-                Component.text("Ability: Instant Transmission", NamedTextColor.GOLD),
-                Component.text("Right click. Teleport 8 blocks. Costs 45 mana.", NamedTextColor.GRAY),
-                Component.text("Speed +50 for 3 seconds.", NamedTextColor.GRAY),
-                Component.text("#" + serial, NamedTextColor.DARK_GRAY)
+                Lore.plain("Damage: ", NamedTextColor.GRAY).append(Component.text("+120", NamedTextColor.RED)),
+                Lore.plain("Strength: ", NamedTextColor.GRAY).append(Component.text("+100", NamedTextColor.RED)),
+                Component.empty(),
+                Lore.plain("Ability: Void Step ", NamedTextColor.GOLD).append(Component.text("RIGHT CLICK", NamedTextColor.YELLOW).decoration(net.kyori.adventure.text.format.TextDecoration.BOLD, true)),
+                Lore.plain("Blink 8 blocks ahead and gain", NamedTextColor.GRAY),
+                Lore.plain("+50 Speed for 3 seconds.", NamedTextColor.GRAY),
+                Lore.plain("Mana Cost: ", NamedTextColor.DARK_GRAY).append(Component.text("45", NamedTextColor.DARK_AQUA)),
+                Component.empty(),
+                Lore.plain("Serial #" + serial + " on Somnia", NamedTextColor.DARK_GRAY),
+                Component.empty(),
+                Lore.footer(Gear.Rarity.EPIC, "SWORD")
         ));
+        meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ATTRIBUTES, org.bukkit.inventory.ItemFlag.HIDE_UNBREAKABLE);
         meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "aotv"), PersistentDataType.LONG, serial);
         stack.setItemMeta(meta);
         HoldItems.makeUnbreakable(stack);
@@ -1706,10 +1757,10 @@ final class WordChain implements Listener {
         return new NamespacedKey(plugin, "aspect_of_the_void");
     }
 
-    private ItemStack voidResult() {
+    ItemStack voidResult() {
         ItemStack stack = new ItemStack(Material.NETHERITE_SWORD);
         ItemMeta meta = stack.getItemMeta();
-        meta.displayName(Component.text("Aspect of the Void", NamedTextColor.DARK_PURPLE).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+        meta.displayName(Component.text("Voidstep Blade", NamedTextColor.DARK_PURPLE).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
         meta.lore(List.of(
                 Component.text("Click to sign.", NamedTextColor.YELLOW).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false),
                 Component.text("Spends 1 cobblestone.", NamedTextColor.GRAY).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false),
@@ -2044,6 +2095,9 @@ final class WordChain implements Listener {
         BigInteger[] trusted;
         boolean trustLocal;
         int trustFails;
+        /** Callbacks waiting for the next trusted write, and the ones riding the write in flight. */
+        final List<java.util.function.Consumer<Boolean>> hooks = new ArrayList<>();
+        List<java.util.function.Consumer<Boolean>> flying;
         final List<PendingBreak> breaks = new ArrayList<>();
         final List<PendingPlace> places = new ArrayList<>();
         final List<PendingDrop> drops = new ArrayList<>();

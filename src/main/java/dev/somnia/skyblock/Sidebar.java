@@ -89,7 +89,7 @@ final class Sidebar {
         int hours = (int) (t / 1000);
         int minutes = (int) ((t % 1000) * 60 / 1000) / 10 * 10;
         int h12 = hours % 12 == 0 ? 12 : hours % 12;
-        return h12 + ":" + String.format("%02d", minutes) + (hours < 12 ? "am" : "pm");
+        return h12 + ":" + String.format(java.util.Locale.ROOT, "%02d", minutes) + (hours < 12 ? "am" : "pm");
     }
 
     static boolean day(long time) {
@@ -138,6 +138,21 @@ final class Sidebar {
             width += px(c) + (bold && c != ' ' ? 1 : 0);
         }
         return width;
+    }
+
+    /** Area name for the tab list (same rules as the board's ⏣ line). */
+    String area(Player player) {
+        String where = zone.apply(player);
+        if (where != null) {
+            return where;
+        }
+        boolean island = plugin != null && player.getWorld().equals(plugin.islands().world());
+        return island ? "Your Island" : "None";
+    }
+
+    /** Last known STT balance text for the tab list. */
+    String stt(UUID id) {
+        return stt.getOrDefault(id, "…");
     }
 
     void show(Player player, Profile profile) {

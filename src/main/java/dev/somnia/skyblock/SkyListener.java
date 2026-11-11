@@ -180,6 +180,9 @@ final class SkyListener implements Listener {
             solidify(player);
         }
         Inventory inventory = event.getInventory();
+        if (inventory.getHolder() instanceof Menu) {
+            return; // menu icons carry their own lore
+        }
         ItemStack[] contents = inventory.getContents();
         if (HoldItems.makeUnbreakable(contents)) {
             inventory.setContents(contents);
@@ -187,6 +190,9 @@ final class SkyListener implements Listener {
     }
 
     private static void solidify(Player player) {
+        if (player.getOpenInventory().getTopInventory().getHolder() instanceof Market.View view && view.merchant) {
+            return; // sell-mode tooltips stay until the shop closes
+        }
         ItemStack[] storage = player.getInventory().getStorageContents();
         ItemStack[] armor = player.getInventory().getArmorContents();
         ItemStack offhand = player.getInventory().getItemInOffHand();

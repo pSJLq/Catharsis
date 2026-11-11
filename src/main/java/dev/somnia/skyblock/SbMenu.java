@@ -160,6 +160,22 @@ final class SbMenu implements Listener, CommandExecutor {
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> give(player), 2L);
     }
 
+    /** Holds an empty slot 9 with a placeholder while items are added; run the result to free it again. */
+    static Runnable reserveStar(Player player) {
+        ItemStack current = player.getInventory().getItem(STAR_SLOT);
+        if (current != null && !current.getType().isAir()) {
+            return () -> { };
+        }
+        ItemStack hold = new ItemStack(Material.BARRIER);
+        player.getInventory().setItem(STAR_SLOT, hold);
+        return () -> {
+            ItemStack now = player.getInventory().getItem(STAR_SLOT);
+            if (now != null && now.getType() == Material.BARRIER && !now.hasItemMeta()) {
+                player.getInventory().setItem(STAR_SLOT, null);
+            }
+        };
+    }
+
     /** Pickups never fill slot 9: when it is empty (star turned off) the star holds it for this tick. */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onPickup(org.bukkit.event.player.PlayerAttemptPickupItemEvent event) {
@@ -293,6 +309,7 @@ final class SbMenu implements Listener, CommandExecutor {
             case "collection" -> openCollections(player);
             case "calendar" -> openCalendar(player);
             case "warp" -> openTravel(player);
+            case "levels" -> openLevels(player);
             default -> openMain(player);
         }
         return true;
@@ -350,7 +367,7 @@ final class SbMenu implements Listener, CommandExecutor {
 
     static String percent(long have, long need) {
         double p = need <= 0 ? 100 : 100.0 * have / need;
-        return (p == Math.floor(p) ? String.valueOf((int) p) : String.format("%.1f", p)) + "%";
+        return (p == Math.floor(p) ? String.valueOf((int) p) : String.format(java.util.Locale.ROOT, "%.1f", p)) + "%";
     }
 
     private View page(String title) {
@@ -416,7 +433,7 @@ final class SbMenu implements Listener, CommandExecutor {
         avg /= Skills.Skill.values().length;
         List<Component> sl = new ArrayList<>(wrap("View your Skill progression and rewards.", NamedTextColor.GRAY));
         sl.add(Component.empty());
-        sl.add(plain(String.format("%.1f", avg) + " Skill Avg.", NamedTextColor.GOLD));
+        sl.add(plain(String.format(java.util.Locale.ROOT, "%.1f", avg) + " Skill Avg.", NamedTextColor.GOLD));
         sl.add(Component.empty());
         sl.add(plain("Also accessible via /skills", NamedTextColor.DARK_GRAY));
         sl.add(Component.empty());
@@ -447,7 +464,8 @@ final class SbMenu implements Listener, CommandExecutor {
         tl.add(plain("Use ", NamedTextColor.GRAY).append(plain("/trade <player>", NamedTextColor.YELLOW)));
         tl.add(Component.empty());
         tl.add(click("Click for help!"));
-        view.set(22, icon(Material.EMERALD, plain("Trades", NamedTextColor.GREEN), tl), c -> {
+        view.set(22, levelingIcon(profile), c -> openLevels(player));
+        view.set(46, icon(Material.EMERALD, plain("Trades", NamedTextColor.GREEN), tl), c -> {
             player.closeInventory();
             player.sendMessage(Component.text("Stand next to a player and type /trade <name>. Both of you lock in before the swap.", NamedTextColor.YELLOW));
         });
@@ -487,7 +505,7 @@ final class SbMenu implements Listener, CommandExecutor {
         view.set(31, icon(Material.CRAFTING_TABLE, plain("Crafting Table", NamedTextColor.GREEN), List.of(
                 plain("Opens the crafting grid.", NamedTextColor.GRAY), plain("Crafting earns Carpentry XP.", NamedTextColor.GRAY),
                 Component.empty(), click("Click to open!"))),
-                c -> player.openWorkbench(null, true));
+                c -> plugin.craft().open(player));
         view.set(32, icon(Material.LEATHER_CHESTPLATE, plain("Wardrobe", NamedTextColor.GREEN), List.of(
                 plain("See the armor you wear and", NamedTextColor.GRAY), plain("what each piece adds.", NamedTextColor.GRAY),
                 Component.empty(), click("Click to view!"))),
@@ -510,7 +528,7 @@ final class SbMenu implements Listener, CommandExecutor {
         view.set(48, icon(Material.NAME_TAG, plain("Profile Management", NamedTextColor.GREEN), List.of(
                 plain("Purse ", NamedTextColor.GRAY).append(plain(WalletService.shortAddress(profile.wallet), NamedTextColor.AQUA)),
                 plain("SkyBlock Level ", NamedTextColor.GRAY).append(plain(String.valueOf(Skills.skyblockLevel(profile)), Skills.levelColor(Skills.skyblockLevel(profile)))),
-                plain("Coins ", NamedTextColor.GRAY).append(plain(String.format("%,d", profile.coins), NamedTextColor.GOLD)),
+                plain("Coins ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", profile.coins), NamedTextColor.GOLD)),
                 plain("SkyBlock Level rewards: ", NamedTextColor.GRAY).append(plain("SOON", NamedTextColor.GRAY).decoration(TextDecoration.BOLD, true)),
                 Component.empty(), click("Click to show deposit info!"))), c -> { player.closeInventory(); player.performCommand("deposit"); });
         view.set(49, icon(Material.BARRIER, plain("Close", NamedTextColor.RED), List.of()), c -> player.closeInventory());
@@ -542,9 +560,25 @@ final class SbMenu implements Listener, CommandExecutor {
     }
 
     // ------------------------------------------------------------------ stats & equipment
+    private static Component statRow(String symbol, String name, NamedTextColor color, String value, boolean live) {
+        Component row = plain((symbol.isEmpty() ? "" : symbol + " ") + name + ": ", color).append(plain(value, NamedTextColor.WHITE));
+        return live ? row : row.append(plain(" SOON", NamedTextColor.DARK_GRAY));
+    }
+
+    private ItemStack category(Material material, String title, NamedTextColor color, String about, List<Component> rows) {
+        List<Component> lore = new ArrayList<>(wrap(about, NamedTextColor.GRAY));
+        lore.add(Component.empty());
+        lore.addAll(rows);
+        lore.add(Component.empty());
+        lore.add(click("Click for details!"));
+        return icon(material, plain(title, color), lore);
+    }
+
     void openStats(Player player) {
         Stats.Sheet sheet = plugin.stats().sheet(player);
-        View view = page("Your Equipment and Stats");
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        View view = page("Stats & Equipment");
+        // Left column: armor (helmet at the top).
         ItemStack[] armor = player.getInventory().getArmorContents();
         int[] armorSlots = {37, 28, 19, 10}; // boots, legs, chest, helmet
         String[] empty = {"Empty Boots Slot", "Empty Leggings Slot", "Empty Chestplate Slot", "Empty Helmet Slot"};
@@ -556,38 +590,282 @@ final class SbMenu implements Listener, CommandExecutor {
                 view.set(armorSlots[i], piece.clone(), null);
             }
         }
+        // Middle column: equipment frames. Not in v1.
+        int[] gearSlots = {11, 20, 29, 38};
+        String[] gearNames = {"Necklace Slot", "Cloak Slot", "Belt Slot", "Gloves Slot"};
+        for (int i = 0; i < 4; i++) {
+            view.set(gearSlots[i], soon(Material.LIGHT_GRAY_STAINED_GLASS_PANE, gearNames[i], "Equipment pieces will fit here and add their stats."), null);
+        }
         ItemStack hand = player.getInventory().getItemInMainHand();
-        view.set(46, hand.getType().isAir() || SbMenu.isStar(plugin, hand)
-                ? icon(Material.LIGHT_GRAY_STAINED_GLASS_PANE, plain("Empty Hand", NamedTextColor.GRAY), List.of()) : hand.clone(), null);
-        record S(Material m, String sym, String name, NamedTextColor color, String value, String text) {
+        view.set(47, hand.getType().isAir() || SbMenu.isStar(plugin, hand)
+                ? icon(Material.LIGHT_GRAY_STAINED_GLASS_PANE, plain("Empty Hand", NamedTextColor.GRAY), List.of(plain("Hold a weapon to see its damage here.", NamedTextColor.GRAY)))
+                : hand.clone(), null);
+        // Right side: stat categories.
+        long hit = (long) Math.floor((5 + sheet.damage()) * (1 + sheet.strength() / 100.0) * (1 + Stats.warrior(Stats.combatLevel(profile.combatXp)) / 100.0));
+        view.set(14, category(Material.DIAMOND_SWORD, "Combat Stats", NamedTextColor.RED, "What keeps you alive and how hard you hit.", List.of(
+                statRow("❤", "Health", NamedTextColor.RED, String.valueOf(sheet.health()), true),
+                statRow("❈", "Defense", NamedTextColor.GREEN, String.valueOf(sheet.defense()), true),
+                statRow("❁", "Strength", NamedTextColor.RED, String.valueOf(sheet.strength()), true),
+                statRow("✎", "Intelligence", NamedTextColor.AQUA, String.valueOf(sheet.intelligence()), true),
+                statRow("☣", "Crit Chance", NamedTextColor.BLUE, sheet.critChance() + "%", true),
+                statRow("☠", "Crit Damage", NamedTextColor.BLUE, sheet.critDamage() + "%", true),
+                statRow("⚔", "Bonus Attack Speed", NamedTextColor.YELLOW, "0%", false),
+                statRow("", "True Defense", NamedTextColor.WHITE, "0", false),
+                statRow("", "Ferocity", NamedTextColor.RED, "0", false),
+                statRow("", "Swing Range", NamedTextColor.YELLOW, "3", false),
+                statRow("", "Health Regen", NamedTextColor.RED, "100", true),
+                statRow("", "Vitality", NamedTextColor.DARK_RED, "100", false),
+                statRow("", "Mending", NamedTextColor.GREEN, "100", false),
+                Component.empty(),
+                plain("Hit: ", NamedTextColor.GRAY).append(plain(String.valueOf(hit), NamedTextColor.RED))
+                        .append(plain("  Crit: ", NamedTextColor.GRAY)).append(plain(String.valueOf((long) Math.floor(hit * (1 + sheet.critDamage() / 100.0))), NamedTextColor.RED))
+        )), c -> combatDetails(player));
+        view.set(15, category(Material.DIAMOND_PICKAXE, "Gathering Stats", NamedTextColor.GOLD, "How fast you break blocks and how much they drop.", List.of(
+                statRow("", "Mining Speed", NamedTextColor.GOLD, "0", false),
+                statRow("", "Mining Fortune", NamedTextColor.GOLD, "0", false),
+                statRow("", "Breaking Power", NamedTextColor.DARK_GREEN, "0", false)
+        )), null);
+        view.set(16, category(Material.ENCHANTED_BOOK, "Wisdom Stats", NamedTextColor.DARK_AQUA, "Extra skill XP from every source.", List.of(
+                statRow("", "Combat Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Mining Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Farming Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Foraging Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Fishing Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Enchanting Wisdom", NamedTextColor.DARK_AQUA, "0", false),
+                statRow("", "Carpentry Wisdom", NamedTextColor.DARK_AQUA, "0", false)
+        )), null);
+        view.set(23, category(Material.GOLDEN_HOE, "Farming Stats", NamedTextColor.GOLD, "Bigger harvests from every crop.", List.of(
+                statRow("", "Farming Fortune", NamedTextColor.GOLD, "0", false)
+        )), null);
+        view.set(24, category(Material.OAK_LEAVES, "Foraging Stats", NamedTextColor.GOLD, "More logs from every tree.", List.of(
+                statRow("", "Foraging Fortune", NamedTextColor.GOLD, "0", false)
+        )), null);
+        view.set(25, category(Material.FISHING_ROD, "Fishing Stats", NamedTextColor.AQUA, "Better luck at the water's edge.", List.of(
+                statRow("", "Sea Creature Chance", NamedTextColor.DARK_AQUA, "0%", false),
+                statRow("", "Fishing Speed", NamedTextColor.AQUA, "0", false),
+                statRow("", "Treasure Chance", NamedTextColor.GOLD, "0%", false)
+        )), null);
+        view.set(32, category(Material.CLOCK, "Misc Stats", NamedTextColor.LIGHT_PURPLE, "Everything else that shapes your run.", List.of(
+                statRow("✦", "Speed", NamedTextColor.WHITE, String.valueOf(sheet.speed()), true),
+                statRow("✎", "Mana", NamedTextColor.AQUA, String.valueOf(plugin.stats().maxMana(player)), true),
+                statRow("", "Magic Find", NamedTextColor.AQUA, "0", false),
+                statRow("", "Pet Luck", NamedTextColor.LIGHT_PURPLE, "0", false)
+        )), null);
+        // Bottom row: back, close, active effects.
+        List<Component> fx = new ArrayList<>();
+        for (org.bukkit.potion.PotionEffect effect : player.getActivePotionEffects()) {
+            String n = effect.getType().getKey().getKey().replace('_', ' ');
+            fx.add(plain(Character.toUpperCase(n.charAt(0)) + n.substring(1) + " " + ProgressMath.numeral(effect.getAmplifier() + 1), NamedTextColor.GREEN)
+                    .append(plain(effect.isInfinite() ? "" : " " + (effect.getDuration() / 20) + "s", NamedTextColor.GRAY)));
         }
-        List<S> list = List.of(
-                new S(Material.GOLDEN_APPLE, "❤", "Health", NamedTextColor.RED, String.valueOf(sheet.health()), "Your maximum health. Regenerates over time, faster out of combat."),
-                new S(Material.IRON_CHESTPLATE, "❈", "Defense", NamedTextColor.GREEN, String.valueOf(sheet.defense()), "Reduces damage taken: damage × 100 / (100 + Defense)."),
-                new S(Material.BLAZE_POWDER, "❁", "Strength", NamedTextColor.RED, String.valueOf(sheet.strength()), "Raises your damage: (5 + weapon) × (1 + Strength / 100)."),
-                new S(Material.SUGAR, "✦", "Speed", NamedTextColor.WHITE, String.valueOf(sheet.speed()), "Your walk speed. 100 is the base walking speed."),
-                new S(Material.ENCHANTED_BOOK, "✎", "Intelligence", NamedTextColor.AQUA, String.valueOf(sheet.intelligence()), "SOON: Intelligence will raise your maximum Mana. Item abilities use the fixed 100 Mana pool for now."),
-                new S(Material.ARROW, "☣", "Crit Chance", NamedTextColor.BLUE, sheet.critChance() + "%", "Chance for a hit to critically strike."),
-                new S(Material.DIAMOND, "☠", "Crit Damage", NamedTextColor.BLUE, sheet.critDamage() + "%", "Extra damage dealt by a critical hit."),
-                new S(Material.IRON_SWORD, "⚔", "Weapon Damage", NamedTextColor.RED, String.valueOf(sheet.damage()), "Base damage of the item in your hand.")
-        );
-        int[] slots = {13, 14, 15, 16, 22, 23, 24, 25};
-        for (int i = 0; i < list.size(); i++) {
-            S s = list.get(i);
-            List<Component> lore = new ArrayList<>(wrap(s.text(), NamedTextColor.GRAY));
-            lore.add(Component.empty());
-            lore.add(plain("Total: ", NamedTextColor.GRAY).append(plain(s.value(), s.color())));
-            view.set(slots[i], icon(s.m(), plain(s.sym() + " " + s.name() + " ", s.color()).append(plain(s.value(), NamedTextColor.WHITE)), lore), null);
+        if (fx.isEmpty()) {
+            fx.add(plain("No effects are active.", NamedTextColor.GRAY));
         }
-        Profile profile = plugin.profiles().get(player.getUniqueId());
-        long hit = Math.round((5 + sheet.damage()) * (1 + sheet.strength() / 100.0));
-        view.set(31, icon(Material.TARGET, plain("Damage per hit", NamedTextColor.GOLD), List.of(
-                plain("Normal: ", NamedTextColor.GRAY).append(plain(String.valueOf(hit), NamedTextColor.RED)),
-                plain("Critical: ", NamedTextColor.GRAY).append(plain(String.valueOf(Math.round(hit * (1 + sheet.critDamage() / 100.0))), NamedTextColor.RED)),
-                plain("Kills: ", NamedTextColor.GRAY).append(plain(String.valueOf(profile.kills), NamedTextColor.YELLOW)),
-                plain("Best arena wave: ", NamedTextColor.GRAY).append(plain(String.valueOf(profile.bestWave), NamedTextColor.YELLOW)))), null);
-        view.set(34, soon(Material.GOLDEN_PICKAXE, "More Stats", "Mining Speed, Mining Fortune, Farming Fortune, Foraging Fortune, Magic Find, Sea Creature Chance, Ferocity, Attack Speed and True Defense."), null);
+        view.set(50, icon(Material.POTION, plain("Active Effects", NamedTextColor.GREEN), fx), null);
         footer(view, player, () -> openMain(player));
+        player.openInventory(view.inventory);
+    }
+
+    /** Where your combat numbers come from (Click for details on Combat Stats). */
+    private void combatDetails(Player player) {
+        Stats.Sheet sheet = plugin.stats().sheet(player);
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        int sb = Skills.skyblockLevel(profile);
+        int combat = Stats.combatLevel(profile.combatXp);
+        View view = page("Combat Stats");
+        view.set(13, icon(Material.RED_DYE, plain("❤ Health " + sheet.health(), NamedTextColor.RED), List.of(
+                plain("Base: 100", NamedTextColor.GRAY),
+                plain("SkyBlock Level " + sb + ": +" + sb * 5, NamedTextColor.GRAY),
+                plain("Farming: +" + Skills.statTotal(Skills.Skill.FARMING, Skills.level(profile, Skills.Skill.FARMING)), NamedTextColor.GRAY),
+                plain("Fishing: +" + Skills.statTotal(Skills.Skill.FISHING, Skills.level(profile, Skills.Skill.FISHING)), NamedTextColor.GRAY),
+                plain("Carpentry: +" + Skills.statTotal(Skills.Skill.CARPENTRY, Skills.level(profile, Skills.Skill.CARPENTRY)), NamedTextColor.GRAY),
+                plain("Armor and the rest: +" + Math.max(0, sheet.health() - 100 - sb * 5 - Skills.perk(profile, "❤ Health")), NamedTextColor.GRAY))), null);
+        view.set(21, icon(Material.LIME_DYE, plain("❈ Defense " + sheet.defense(), NamedTextColor.GREEN), List.of(
+                plain("Mining: +" + Skills.statTotal(Skills.Skill.MINING, Skills.level(profile, Skills.Skill.MINING)), NamedTextColor.GRAY),
+                plain("Armor: +" + Math.max(0, sheet.defense() - Skills.perk(profile, "❈ Defense")), NamedTextColor.GRAY),
+                Component.empty(),
+                plain("Damage taken: × 100 / (100 + Defense)", NamedTextColor.DARK_GRAY))), null);
+        view.set(22, icon(Material.BLAZE_POWDER, plain("❁ Strength " + sheet.strength(), NamedTextColor.RED), List.of(
+                plain("SkyBlock Level " + sb + ": +" + sb / 5, NamedTextColor.GRAY),
+                plain("Foraging: +" + Skills.statTotal(Skills.Skill.FORAGING, Skills.level(profile, Skills.Skill.FORAGING)), NamedTextColor.GRAY),
+                plain("Gear: +" + Math.max(0, sheet.strength() - sb / 5 - Skills.perk(profile, "❁ Strength")), NamedTextColor.GRAY))), null);
+        view.set(23, icon(Material.ARROW, plain("☣ Crit Chance " + sheet.critChance() + "%", NamedTextColor.BLUE), List.of(
+                plain("Base: 30%", NamedTextColor.GRAY),
+                plain("Combat " + combat + ": +" + combat / 2 + "%", NamedTextColor.GRAY))), null);
+        view.set(31, icon(Material.IRON_SWORD, plain("Warrior", NamedTextColor.GOLD), List.of(
+                plain("Combat " + combat + ": +" + Stats.warrior(combat) + "% damage to mobs", NamedTextColor.GRAY))), null);
+        view.set(48, icon(Material.ARROW, plain("Go Back", NamedTextColor.GREEN), List.of(plain("To Stats & Equipment", NamedTextColor.GRAY))), c -> openStats(player));
+        view.set(49, icon(Material.BARRIER, plain("Close", NamedTextColor.RED), List.of()), c -> player.closeInventory());
+        player.openInventory(view.inventory);
+    }
+
+    // ------------------------------------------------------------------ SkyBlock Leveling
+    /** SkyBlock XP earned from skill level-ups, out of the v1 maximum (all skills at the cap). */
+    static int[] coreSkills(Profile profile) {
+        int have = 0;
+        int max = 0;
+        for (Skills.Skill s : Skills.Skill.values()) {
+            int level = Skills.level(profile, s);
+            for (int l = 1; l <= Skills.max(s); l++) {
+                int xp = Skills.sbXpFor(l);
+                max += xp;
+                if (l <= level) {
+                    have += xp;
+                }
+            }
+        }
+        return new int[]{have, max};
+    }
+
+    static int[] coreCollections(Profile profile) {
+        int have = 0;
+        int max = 0;
+        int tiers = ProgressMath.tiers().length - 1;
+        for (Collects.Entry entry : Collects.ENTRIES) {
+            have += 4 * ProgressMath.tier(Collects.amount(profile, entry));
+            max += 4 * tiers;
+        }
+        return new int[]{have, max};
+    }
+
+    static int areasXp(Profile profile) {
+        int xp = 0;
+        for (String key : profile.discovered) {
+            if (!key.contains(":")) {
+                xp += 5;
+            }
+        }
+        return xp;
+    }
+
+    ItemStack levelingIcon(Profile profile) {
+        int xp = Skills.skyblockXp(profile);
+        int level = xp / 100;
+        List<Component> lore = new ArrayList<>();
+        lore.add(plain("Your SkyBlock Level: ", NamedTextColor.GRAY).append(plain("[", NamedTextColor.DARK_GRAY))
+                .append(plain(String.valueOf(level), Skills.levelColor(level))).append(plain("]", NamedTextColor.DARK_GRAY)));
+        lore.add(Component.empty());
+        lore.addAll(wrap("Skills, collections and quests all add SkyBlock XP. Every 100 XP is one level.", NamedTextColor.GRAY));
+        lore.add(Component.empty());
+        lore.add(plain("Progress to Level " + (level + 1) + ": ", NamedTextColor.GRAY).append(plain(percent(xp % 100, 100), NamedTextColor.YELLOW)));
+        lore.add(bar(xp % 100, 100));
+        lore.add(Component.empty());
+        lore.add(plain("Also accessible via /levels", NamedTextColor.DARK_GRAY));
+        lore.add(Component.empty());
+        lore.add(click("Click to view!"));
+        return icon(Material.EXPERIENCE_BOTTLE, plain("SkyBlock Leveling", NamedTextColor.GREEN), lore);
+    }
+
+    private ItemStack taskIcon(Material material, String name, String about, int have, int max) {
+        List<Component> lore = new ArrayList<>(wrap(about, NamedTextColor.GRAY));
+        lore.add(Component.empty());
+        lore.add(plain("Progress to Complete: ", NamedTextColor.GRAY).append(plain(percent(have, max), NamedTextColor.YELLOW)));
+        lore.add(bar(have, max));
+        lore.add(Component.empty());
+        lore.add(click("Click to view!"));
+        return icon(material, plain(name, NamedTextColor.GREEN), lore);
+    }
+
+    void openLevels(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        int xp = Skills.skyblockXp(profile);
+        int level = xp / 100;
+        View view = page("SkyBlock Leveling");
+        int[] skills = coreSkills(profile);
+        int[] cols = coreCollections(profile);
+        int story = Quests.SKYBLOCK_XP * profile.questStep;
+        int storyMax = Quests.SKYBLOCK_XP * Quests.STEPS.size();
+        int areas = areasXp(profile);
+        int total = skills[1] + cols[1] + storyMax + areas;
+        List<Component> rank = new ArrayList<>();
+        rank.add(plain("Your level: ", NamedTextColor.GRAY).append(plain(String.valueOf(level), Skills.levelColor(level))));
+        rank.add(plain("You have ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", xp) + " XP", NamedTextColor.AQUA)));
+        rank.add(plain("Tasks done: ", NamedTextColor.GRAY).append(plain(percent(xp, total), NamedTextColor.YELLOW)));
+        rank.add(Component.empty());
+        rank.addAll(wrap("A ranking against other players opens at SkyBlock Level 10.", NamedTextColor.DARK_GRAY));
+        rank.add(Component.empty());
+        rank.add(plain("SOON", NamedTextColor.GRAY).decoration(TextDecoration.BOLD, true));
+        view.set(4, icon(Material.PLAYER_HEAD, plain("Your SkyBlock Level Ranking", NamedTextColor.GOLD), rank), null);
+        // Level path: finished green, current yellow, later red.
+        int startLevel = Math.max(1, level - 2);
+        int[] path = {19, 20, 21, 22, 23, 24, 25};
+        for (int i = 0; i < path.length; i++) {
+            int lv = startLevel + i;
+            Material pane;
+            NamedTextColor color;
+            List<Component> lore = new ArrayList<>();
+            if (lv <= level) {
+                pane = Material.LIME_STAINED_GLASS_PANE;
+                color = NamedTextColor.GREEN;
+            } else if (lv == level + 1) {
+                pane = Material.YELLOW_STAINED_GLASS_PANE;
+                color = NamedTextColor.YELLOW;
+                lore.add(plain("Progress: ", NamedTextColor.GRAY).append(plain((xp % 100) + "/100 XP", NamedTextColor.YELLOW)));
+                lore.add(bar(xp % 100, 100));
+                lore.add(Component.empty());
+            } else {
+                pane = Material.RED_STAINED_GLASS_PANE;
+                color = NamedTextColor.RED;
+            }
+            lore.add(plain("Rewards:", NamedTextColor.GRAY));
+            lore.add(plain("  +5 ", NamedTextColor.DARK_GRAY).append(plain("❤ Health", NamedTextColor.RED)));
+            if (lv % 5 == 0) {
+                lore.add(plain("  +1 ", NamedTextColor.DARK_GRAY).append(plain("❁ Strength", NamedTextColor.RED)));
+            }
+            if (lv == 10 || lv == 40 || lv == 80 || lv == 120 || lv == 160 || lv == 200) {
+                lore.add(plain("  New name colour: ", NamedTextColor.DARK_GRAY).append(plain("[" + lv + "]", Skills.levelColor(lv))));
+            }
+            ItemStack stack = icon(pane, plain("Level " + lv, color), lore);
+            stack.setAmount(Math.max(1, Math.min(64, lv)));
+            view.set(path[i], stack, null);
+        }
+        view.set(29, taskIcon(Material.NETHER_STAR, "Core Tasks", "Skill level-ups, collection milestones and the areas you discover.",
+                skills[0] + cols[0] + areas, skills[1] + cols[1] + areas), c -> openCoreTasks(player));
+        view.set(30, taskIcon(Material.WRITABLE_BOOK, "Story Tasks", "The intro quest line. Each objective you finish is worth +" + Quests.SKYBLOCK_XP + " XP.",
+                story, storyMax), c -> openQuests(player));
+        view.set(31, icon(Material.GOLD_BLOCK, plain("Leveling Rewards", NamedTextColor.GREEN), List.of(
+                plain("Every level: ", NamedTextColor.GRAY).append(plain("+5 ❤ Health", NamedTextColor.RED)),
+                plain("Every 5 levels: ", NamedTextColor.GRAY).append(plain("+1 ❁ Strength", NamedTextColor.RED)),
+                plain("Name colour at 10, 40, 80, 120, 160, 200", NamedTextColor.GRAY),
+                Component.empty(),
+                plain("Earned now: ", NamedTextColor.GRAY).append(plain("+" + level * 5 + " ❤", NamedTextColor.RED))
+                        .append(plain(" +" + level / 5 + " ❁", NamedTextColor.RED)))), null);
+        view.set(32, soon(Material.CAKE, "Event Tasks", "SkyBlock XP from seasonal events."), null);
+        view.set(33, soon(Material.WITHER_SKELETON_SKULL, "Dungeon Tasks", "SkyBlock XP from dungeon runs."), null);
+        view.set(37, soon(Material.GLOWSTONE_DUST, "Essence Shop Tasks", "SkyBlock XP from essence upgrades."), null);
+        view.set(38, soon(Material.ROTTEN_FLESH, "Slaying Tasks", "SkyBlock XP from boss slaying."), null);
+        view.set(39, soon(Material.IRON_PICKAXE, "Mining Tasks", "SkyBlock XP from deep mining progress."), null);
+        view.set(40, soon(Material.WHEAT, "Garden Tasks", "SkyBlock XP from a farming garden."), null);
+        view.set(41, soon(Material.SALMON, "Trophy Fishing Tasks", "SkyBlock XP from rare catches."), null);
+        view.set(42, soon(Material.MAP, "Miscellaneous Tasks", "SkyBlock XP from everything else."), null);
+        footer(view, player, () -> openMain(player));
+        player.openInventory(view.inventory);
+    }
+
+    private void openCoreTasks(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        View view = page("Core Tasks");
+        int[] skills = coreSkills(profile);
+        int[] cols = coreCollections(profile);
+        List<Component> sl = new ArrayList<>(wrap("Reach new skill levels. Levels 1-10 give +5 XP, 11-25 give +10 XP.", NamedTextColor.GRAY));
+        sl.add(Component.empty());
+        for (Skills.Skill s : Skills.Skill.values()) {
+            sl.add(plain(s.label + " " + Skills.level(profile, s) + "/" + Skills.max(s), NamedTextColor.GRAY));
+        }
+        sl.add(Component.empty());
+        sl.add(plain("Earned: ", NamedTextColor.GRAY).append(plain(skills[0] + "/" + skills[1] + " XP", NamedTextColor.AQUA)));
+        view.set(20, icon(Material.DIAMOND_SWORD, plain("Skill Level Up", NamedTextColor.GREEN), sl), c -> openSkills(player));
+        List<Component> cl = new ArrayList<>(wrap("Each collection milestone you reach gives +4 XP.", NamedTextColor.GRAY));
+        cl.add(Component.empty());
+        cl.add(plain("Unlocked: ", NamedTextColor.GRAY).append(plain(Collects.unlocked(profile) + "/" + Collects.ENTRIES.size(), NamedTextColor.YELLOW)));
+        cl.add(plain("Earned: ", NamedTextColor.GRAY).append(plain(cols[0] + "/" + cols[1] + " XP", NamedTextColor.AQUA)));
+        view.set(22, icon(Material.PAINTING, plain("Collections", NamedTextColor.GREEN), cl), c -> openCollections(player));
+        view.set(24, icon(Material.FILLED_MAP, plain("Areas Discovered", NamedTextColor.GREEN), List.of(
+                plain("Walk into a new hub area for +5 XP.", NamedTextColor.GRAY),
+                Component.empty(),
+                plain("Earned: ", NamedTextColor.GRAY).append(plain(areasXp(profile) + " XP", NamedTextColor.AQUA)))), null);
+        view.set(48, icon(Material.ARROW, plain("Go Back", NamedTextColor.GREEN), List.of(plain("To SkyBlock Leveling", NamedTextColor.GRAY))), c -> openLevels(player));
+        view.set(49, icon(Material.BARRIER, plain("Close", NamedTextColor.RED), List.of()), c -> player.closeInventory());
         player.openInventory(view.inventory);
     }
 
@@ -633,8 +911,8 @@ final class SbMenu implements Listener, CommandExecutor {
         if (plugin.skillChain().enabled()) {
             long pending = plugin.skillChain().pending(profile, skill);
             boolean synced = plugin.skillChain().loaded(profile.uuid);
-            lore.add(plain("Onchain: " + String.format("%,d", Math.max(0, xp - pending)) + " XP"
-                    + (pending > 0 ? " (+" + String.format("%,d", pending) + " queued)" : "")
+            lore.add(plain("Onchain: " + String.format(java.util.Locale.ROOT, "%,d", Math.max(0, xp - pending)) + " XP"
+                    + (pending > 0 ? " (+" + String.format(java.util.Locale.ROOT, "%,d", pending) + " queued)" : "")
                     + (synced ? "" : " · syncing"), NamedTextColor.DARK_GRAY));
         }
         lore.add(Component.empty());
@@ -743,7 +1021,7 @@ final class SbMenu implements Listener, CommandExecutor {
             List<Component> lore = new ArrayList<>();
             lore.add(plain(cap(entry.category().name()) + " Collection", NamedTextColor.DARK_GRAY));
             lore.add(Component.empty());
-            lore.add(plain("Total Collected: ", NamedTextColor.GRAY).append(plain(String.format("%,d", amount), NamedTextColor.YELLOW)));
+            lore.add(plain("Total Collected: ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", amount), NamedTextColor.YELLOW)));
             if (tier + 1 < tiers.length) {
                 lore.add(plain("Progress to " + entry.name() + " " + ProgressMath.roman(tier + 1) + ": ", NamedTextColor.GRAY)
                         .append(plain(percent(amount, tiers[tier + 1]), NamedTextColor.YELLOW)));
@@ -785,7 +1063,7 @@ final class SbMenu implements Listener, CommandExecutor {
             }
             List<Component> lore = new ArrayList<>();
             if (recipe.coins() > 0) {
-                lore.add(plain(String.format("%,d", recipe.coins()) + " coins", NamedTextColor.GOLD));
+                lore.add(plain(String.format(java.util.Locale.ROOT, "%,d", recipe.coins()) + " coins", NamedTextColor.GOLD));
             }
             for (Map.Entry<String, Integer> mat : recipe.mats().entrySet()) {
                 lore.add(plain(mat.getValue() + "× " + pretty(mat.getKey()), NamedTextColor.GRAY));
@@ -837,7 +1115,7 @@ final class SbMenu implements Listener, CommandExecutor {
                 lore.add(bar(Math.min(profile.questProgress, step.goal()), step.goal()));
             }
             lore.add(plain("Reward: ", NamedTextColor.GRAY).append(plain(step.rewardText(), NamedTextColor.GOLD)));
-            lore.add(plain("+10 SkyBlock XP", NamedTextColor.AQUA));
+            lore.add(plain("+" + Quests.SKYBLOCK_XP + " SkyBlock XP", NamedTextColor.AQUA));
             Material m = done ? Material.LIME_DYE : now ? Material.WRITABLE_BOOK : Material.GRAY_DYE;
             view.set(slots[i], icon(m, plain((done ? "✔ " : now ? "➜ " : "") + step.title(), done ? NamedTextColor.GREEN : now ? NamedTextColor.YELLOW : NamedTextColor.RED), lore), null);
         }

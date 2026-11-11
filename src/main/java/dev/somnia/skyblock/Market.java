@@ -94,8 +94,11 @@ final class Market implements Listener {
         final Map<Integer, Consumer<ClickType>> actions = new HashMap<>();
         /** Optional handler for clicks in the player's own inventory (slot index of PlayerInventory). */
         java.util.function.IntConsumer bottom;
+        final String title;
+        boolean merchant;
 
         View(int size, String title) {
+            this.title = title;
             this.inventory = Bukkit.createInventory(this, size, Component.text(title));
         }
 
@@ -116,30 +119,52 @@ final class Market implements Listener {
     static final List<Recipe> RECIPES = new ArrayList<>();
 
     static {
+        // NPC sell prices: SkyBlock wiki |sell= values (2026-11-11). Beetroot, Pale Oak Log, Raw Iron / Gold,
+        // Colosseum Sigil are ours. Order = merchant shop order.
+        product("wheat", "minecraft:wheat", "Wheat", 6);
+        product("carrot", "minecraft:carrot", "Carrot", 3);
+        product("potato", "minecraft:potato", "Potato", 3);
+        product("pumpkin", "minecraft:pumpkin", "Pumpkin", 10);
+        product("melon", "minecraft:melon_slice", "Melon Slice", 2);
+        product("sugar_cane", "minecraft:sugar_cane", "Sugar Cane", 4);
+        product("cactus", "minecraft:cactus", "Cactus", 4);
+        product("cocoa_beans", "minecraft:cocoa_beans", "Cocoa Beans", 3);
+        product("nether_wart", "minecraft:nether_wart", "Nether Wart", 4);
+        product("beetroot", "minecraft:beetroot", "Beetroot", 3);
+        product("wheat_seeds", "minecraft:wheat_seeds", "Seeds", 3);
+        product("melon_seeds", "minecraft:melon_seeds", "Melon Seeds", 1);
+        product("pumpkin_seeds", "minecraft:pumpkin_seeds", "Pumpkin Seeds", 1);
+        product("green_dye", "minecraft:green_dye", "Cactus Green", 4);
         product("cobblestone", "minecraft:cobblestone", "Cobblestone", 1);
         product("coal", "minecraft:coal", "Coal", 2);
         product("raw_iron", "minecraft:raw_iron", "Raw Iron", 3);
-        product("iron_ingot", "minecraft:iron_ingot", "Iron Ingot", 3);
+        product("iron_ingot", "minecraft:iron_ingot", "Iron Ingot", 2);
         product("raw_gold", "minecraft:raw_gold", "Raw Gold", 4);
-        product("gold_ingot", "minecraft:gold_ingot", "Gold Ingot", 4);
+        product("gold_ingot", "minecraft:gold_ingot", "Gold Ingot", 3);
+        product("gold_block", "minecraft:gold_block", "Block of Gold", 27);
+        product("diamond", "minecraft:diamond", "Diamond", 8);
+        product("emerald", "minecraft:emerald", "Emerald", 4);
+        product("lapis", "minecraft:lapis_lazuli", "Lapis Lazuli", 1);
+        product("redstone", "minecraft:redstone", "Redstone Dust", 1);
         product("oak_log", "minecraft:oak_log", "Oak Log", 2);
-        product("wheat", "minecraft:wheat", "Wheat", 1);
         product("birch_log", "minecraft:birch_log", "Birch Log", 2);
+        product("spruce_log", "minecraft:spruce_log", "Spruce Log", 2);
+        product("jungle_log", "minecraft:jungle_log", "Jungle Log", 2);
         product("dark_oak_log", "minecraft:dark_oak_log", "Dark Oak Log", 2);
-        product("carrot", "minecraft:carrot", "Carrot", 1);
-        product("potato", "minecraft:potato", "Potato", 1);
-        product("cod", "minecraft:cod", "Raw Cod", 3);
-        product("salmon", "minecraft:salmon", "Raw Salmon", 4);
-        product("gold_block", "minecraft:gold_block", "Gold Block", 36);
+        product("pale_oak_log", "minecraft:pale_oak_log", "Pale Oak Log", 2);
         product("rotten_flesh", "minecraft:rotten_flesh", "Rotten Flesh", 2);
         product("bone", "minecraft:bone", "Bone", 2);
         product("string", "minecraft:string", "String", 3);
         product("spider_eye", "minecraft:spider_eye", "Spider Eye", 3);
+        product("cod", "minecraft:cod", "Raw Cod", 6);
+        product("salmon", "minecraft:salmon", "Raw Salmon", 10);
+        product("pufferfish", "minecraft:pufferfish", "Pufferfish", 15);
+        product("tropical_fish", "minecraft:tropical_fish", "Tropical Fish", 20);
         product("enchanted_cobble", "skyblock:enchanted_cobble", "Enchanted Cobblestone", 160);
         product("enchanted_oak", "skyblock:enchanted_oak", "Enchanted Oak Log", 320);
         product("enchanted_rotten_flesh", "skyblock:enchanted_rotten_flesh", "Enchanted Rotten Flesh", 320);
-        product("revenant_flesh", "skyblock:revenant_flesh", "Revenant Flesh", 20);
-        product("wolf_tooth", "skyblock:wolf_tooth", "Wolf Tooth", 25);
+        product("revenant_flesh", "skyblock:revenant_flesh", "Barrow Flesh", 1);
+        product("wolf_tooth", "skyblock:wolf_tooth", "Thornkeep Fang", 1);
         product("colosseum_sigil", "skyblock:colosseum_sigil", "Colosseum Sigil", 150);
 
         recipe("undead_sword", 150, Map.of(), 0);
@@ -299,7 +324,9 @@ final class Market implements Listener {
                 return;
             }
             int amount = stack.getAmount();
+            Runnable free = SbMenu.reserveStar(player);
             Map<Integer, ItemStack> rest = player.getInventory().addItem(stack);
+            free.run();
             int unplaced = 0;
             for (ItemStack r : rest.values()) {
                 unplaced += r.getAmount();
@@ -483,43 +510,252 @@ final class Market implements Listener {
 
     // ---------- Merchant (coins) ----------
 
+    /** Last stack sold to a merchant, per player: click the buyback slot to buy it back at the same price. */
+    private record Sold(String key, int qty, long coins) {
+    }
+
+    private final Map<UUID, Sold> buyback = new HashMap<>();
+
+    /** What a merchant stocks: item key and the wiki |buy= price (coins each). */
+    private record Stock(String key, int buy) {
+    }
+
+    private static List<Stock> stockOf(String title) {
+        return switch (title) {
+            case "Farmer Odo" -> List.of(new Stock("minecraft:wheat", 10));
+            case "Woodward Fenn" -> List.of(new Stock("minecraft:oak_log", 5));
+            case "Fisher Hale" -> List.of();
+            default -> List.of(new Stock("minecraft:cobblestone", 3), new Stock("minecraft:wheat", 10), new Stock("minecraft:oak_log", 5));
+        };
+    }
+
     void openMerchant(Player player) {
-        View view = new View(54, "Merchant — sell for coins");
-        frame(view);
-        int slot = 10;
-        long everything = 0;
-        for (Product product : PRODUCTS.values()) {
-            int have = count(player, product.key());
-            if (slot % 9 == 8) {
-                slot += 2;
-            }
-            if (slot >= 44) {
-                break;
-            }
-            ItemStack stack = itemIcon(product.key(), Math.max(1, have));
-            decorate(stack, null, NamedTextColor.WHITE, List.of(
-                    "$Merchant pays: " + product.npc() + " coins each",
-                    "You have: " + have,
-                    have > 0 ? "!Click to sell all for " + String.format("%,d", (long) have * product.npc()) + " coins" : "-Nothing to sell"
-            ));
-            everything += (long) have * product.npc();
-            view.set(slot, stack, click -> {
-                sellToMerchant(player, product);
-                openMerchant(player);
-            });
-            slot++;
+        openMerchant(player, "Merchant");
+    }
+
+    /**
+     * Shop in the SkyBlock layout: gray border, the merchant's stock inside, buyback on the bottom row.
+     * Clicking a stack in your own inventory sells the whole stack. The stack leaves through the SkyWord
+     * bag write and coins are paid only after that write lands; a failed write puts the stack back.
+     */
+    void openMerchant(Player player, String title) {
+        View view = new View(54, title == null || title.isBlank() ? "Merchant" : title);
+        view.merchant = true;
+        ItemStack pane = icon(Material.GRAY_STAINED_GLASS_PANE, " ", NamedTextColor.GRAY, List.of());
+        for (int i = 0; i < 54; i++) {
+            view.getInventory().setItem(i, pane);
         }
-        long total = everything;
-        view.set(49, icon(Material.HOPPER, "Sell everything", NamedTextColor.GOLD, List.of(
-                "$" + String.format("%,d", total) + " coins for all listed items",
-                "Coins buy gear at the Blacksmith.",
-                "Coins never convert to STT. Trade STT at the Bazaar.")), click -> {
-            for (Product product : PRODUCTS.values()) {
-                sellToMerchant(player, product);
-            }
-            openMerchant(player);
-        });
+        int[] inner = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
+        List<Stock> stock = stockOf(view.title);
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        for (int i = 0; i < inner.length; i++) {
+            view.getInventory().setItem(inner[i], null);
+        }
+        for (int i = 0; i < stock.size() && i < inner.length; i++) {
+            Stock item = stock.get(i);
+            ItemStack shown = itemIcon(item.key(), 1);
+            ItemMeta meta = shown.getItemMeta();
+            List<Component> lore = new ArrayList<>(meta.lore() == null ? List.of() : meta.lore());
+            lore.add(Component.empty());
+            lore.add(Lore.plain("Cost", NamedTextColor.GRAY));
+            lore.add(Lore.plain(String.format(java.util.Locale.ROOT, "%,d", item.buy()) + " Coins", NamedTextColor.GOLD));
+            lore.add(Component.empty());
+            lore.add(Lore.plain("Click to trade!", NamedTextColor.YELLOW));
+            lore.add(Lore.plain("Right-Click for more trading options!", NamedTextColor.YELLOW));
+            meta.lore(lore);
+            shown.setItemMeta(meta);
+            view.set(inner[i], shown, click -> {
+                int qty = click.isRightClick() ? 64 : click.isShiftClick() ? 16 : 1;
+                buyFromMerchant(player, view.title, item, qty);
+            });
+        }
+        if (stock.isEmpty()) {
+            view.set(22, SbMenu.soon(Material.FISHING_ROD, "Tackle and bait", "This merchant will stock fishing gear later. You can still sell your catch here."), null);
+        }
+        Sold last = buyback.get(player.getUniqueId());
+        if (last != null) {
+            ItemStack back = itemIcon(last.key(), last.qty());
+            ItemMeta meta = back.getItemMeta();
+            List<Component> lore = new ArrayList<>(meta.lore() == null ? List.of() : meta.lore());
+            lore.add(Component.empty());
+            lore.add(Lore.plain("Cost", NamedTextColor.GRAY));
+            lore.add(Lore.plain(String.format(java.util.Locale.ROOT, "%,d", last.coins()) + " Coins", NamedTextColor.GOLD));
+            lore.add(Component.empty());
+            lore.add(Lore.plain("Click to buyback!", NamedTextColor.YELLOW));
+            meta.lore(lore);
+            back.setItemMeta(meta);
+            view.set(49, back, click -> buyBack(player, view.title));
+        } else {
+            view.set(49, icon(Material.HOPPER, "Sell Item", NamedTextColor.GREEN, List.of(
+                    "Click items in your inventory to", "sell them to this shop!", "",
+                    "You have " + String.format(java.util.Locale.ROOT, "%,d", profile.coins) + " coins.")), null);
+        }
+        view.bottom = slot -> sellSlot(player, view.title, slot);
         player.openInventory(view.getInventory());
+        sellMode(player, true);
+    }
+
+    /** Sell-mode tooltips on the player's own items while a merchant is open (Lore.sellView), plain again on close. */
+    void sellMode(Player player, boolean on) {
+        ItemStack[] storage = player.getInventory().getStorageContents();
+        boolean changed = false;
+        for (int i = 0; i < storage.length; i++) {
+            ItemStack stack = storage[i];
+            if (stack == null || stack.getType().isAir() || i == SbMenu.STAR_SLOT) {
+                continue;
+            }
+            if (on) {
+                Product product = productOf(stack);
+                if (product != null) {
+                    changed |= Lore.sellView(stack, product.npc());
+                }
+            } else {
+                changed |= Lore.normalize(stack);
+            }
+        }
+        if (changed) {
+            player.getInventory().setStorageContents(storage);
+        }
+    }
+
+    Product productOf(ItemStack stack) {
+        String key = HoldItems.keyOf(stack, plugin);
+        if (key == null) {
+            return null;
+        }
+        for (Product product : PRODUCTS.values()) {
+            if (product.key().equals(key)) {
+                return product;
+            }
+        }
+        return null;
+    }
+
+    private void sellSlot(Player player, String title, int slot) {
+        if (slot == SbMenu.STAR_SLOT || slot < 0 || slot >= 36) {
+            return; // the menu star and armor are never sold
+        }
+        ItemStack stack = player.getInventory().getItem(slot);
+        if (stack == null || stack.getType().isAir() || SbMenu.isStar(plugin, stack)) {
+            return;
+        }
+        Product product = productOf(stack);
+        if (product == null) {
+            player.sendMessage(Component.text("That item can't be sold to this shop.", NamedTextColor.RED));
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.7f, 1f);
+            return;
+        }
+        if (plugin.words() != null && !plugin.words().ready(player)) {
+            player.sendMessage(Component.text("The chain inventory is still loading.", NamedTextColor.RED));
+            return;
+        }
+        int qty = stack.getAmount();
+        long coins = (long) qty * product.npc();
+        String key = product.key();
+        UUID id = player.getUniqueId();
+        player.getInventory().setItem(slot, null);
+        player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.6f, 1.6f);
+        java.util.function.Consumer<Boolean> pay = ok -> {
+            Player online = plugin.getServer().getPlayer(id);
+            if (!ok) {
+                if (online != null) {
+                    online.sendMessage(Component.text("Sale cancelled: the bag write did not land, your " + product.name() + " stayed.", NamedTextColor.RED));
+                }
+                return;
+            }
+            Profile profile = plugin.profiles().get(id);
+            if (online != null) {
+                plugin.stats().addCoins(online, coins);
+                online.sendMessage(Component.text("You sold ", NamedTextColor.GREEN)
+                        .append(Component.text(product.name(), NamedTextColor.WHITE))
+                        .append(Component.text(" x" + qty + " for ", NamedTextColor.GRAY))
+                        .append(Component.text(String.format(java.util.Locale.ROOT, "%,d", coins) + " Coins", NamedTextColor.GOLD))
+                        .append(Component.text("!", NamedTextColor.GRAY)));
+                plugin.quests().hit(online, "sell", 1);
+            } else {
+                profile.coins += coins;
+            }
+            plugin.profiles().save(profile);
+            buyback.put(id, new Sold(key, qty, coins));
+            if (online != null && online.getOpenInventory().getTopInventory().getHolder() instanceof View open && open.merchant) {
+                openMerchant(online, open.title);
+            }
+        };
+        if (plugin.words() != null) {
+            plugin.words().commitLocal(player, pay);
+        } else {
+            pay.accept(true);
+        }
+    }
+
+    private void buyBack(Player player, String title) {
+        Sold last = buyback.get(player.getUniqueId());
+        if (last == null) {
+            return;
+        }
+        if (player.getInventory().firstEmpty() < 0) {
+            player.sendMessage(Component.text("Free an inventory slot first.", NamedTextColor.RED));
+            return;
+        }
+        if (!plugin.stats().spendCoins(player, last.coins())) {
+            return;
+        }
+        buyback.remove(player.getUniqueId());
+        deliver(player, last.key(), last.qty(), last.coins(), "Bought back");
+        openMerchant(player, title);
+    }
+
+    private void buyFromMerchant(Player player, String title, Stock item, int qty) {
+        long cost = (long) item.buy() * qty;
+        if (player.getInventory().firstEmpty() < 0 && count(player, item.key()) % 64 == 0) {
+            player.sendMessage(Component.text("Free an inventory slot first.", NamedTextColor.RED));
+            return;
+        }
+        if (!plugin.stats().spendCoins(player, cost)) {
+            return;
+        }
+        deliver(player, item.key(), qty, cost, "Bought");
+        openMerchant(player, title);
+    }
+
+    /** Puts bought items in the bag; if the bag write is rolled back the coins come back. */
+    private void deliver(Player player, String key, int qty, long coins, String verb) {
+        UUID id = player.getUniqueId();
+        giveOrStash(id, key, qty, false);
+        java.util.function.Consumer<Boolean> done = ok -> {
+            Player online = plugin.getServer().getPlayer(id);
+            if (ok) {
+                if (online != null) {
+                    online.sendMessage(Component.text(verb + " ", NamedTextColor.GREEN).append(Component.text(label(key) + " x" + qty, NamedTextColor.WHITE))
+                            .append(Component.text(" for ", NamedTextColor.GRAY)).append(Component.text(String.format(java.util.Locale.ROOT, "%,d", coins) + " Coins", NamedTextColor.GOLD)));
+                }
+                return;
+            }
+            Profile profile = plugin.profiles().get(id);
+            if (online != null) {
+                plugin.stats().addCoins(online, coins);
+                online.sendMessage(Component.text("Purchase refunded: the bag write did not land.", NamedTextColor.RED));
+            } else {
+                profile.coins += coins;
+            }
+            plugin.profiles().save(profile);
+        };
+        if (plugin.words() != null) {
+            plugin.words().commitLocal(player, done);
+        } else {
+            done.accept(true);
+        }
+    }
+
+    @EventHandler
+    public void onMerchantClose(org.bukkit.event.inventory.InventoryCloseEvent event) {
+        if (event.getView().getTopInventory().getHolder() instanceof View view && view.merchant && event.getPlayer() instanceof Player player) {
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (!(player.getOpenInventory().getTopInventory().getHolder() instanceof View open && open.merchant)) {
+                    sellMode(player, false);
+                }
+            });
+        }
     }
 
     void sellToMerchant(Player player, Product product) {
@@ -528,10 +764,21 @@ final class Market implements Listener {
             return;
         }
         long coins = (long) have * product.npc();
-        plugin.stats().addCoins(player, coins);
-        commit(player);
-        player.sendMessage(Component.text("Sold " + have + "x " + product.name() + " for " + String.format("%,d", coins) + " coins.", NamedTextColor.GOLD));
-        plugin.quests().hit(player, "sell", 1);
+        UUID id = player.getUniqueId();
+        java.util.function.Consumer<Boolean> pay = ok -> {
+            Player online = plugin.getServer().getPlayer(id);
+            if (!ok || online == null) {
+                return;
+            }
+            plugin.stats().addCoins(online, coins);
+            online.sendMessage(Component.text("Sold " + have + "x " + product.name() + " for " + String.format(java.util.Locale.ROOT, "%,d", coins) + " coins.", NamedTextColor.GOLD));
+            plugin.quests().hit(online, "sell", 1);
+        };
+        if (plugin.words() != null) {
+            plugin.words().commitLocal(player, pay);
+        } else {
+            pay.accept(true);
+        }
     }
 
     // ---------- Blacksmith (sinks) ----------
@@ -548,7 +795,7 @@ final class Market implements Listener {
             List<String> lore = new ArrayList<>();
             lore.add("!Cost");
             if (recipe.coins() > 0) {
-                lore.add((profile.coins >= recipe.coins() ? "+" : "-") + String.format("%,d", recipe.coins()) + " coins");
+                lore.add((profile.coins >= recipe.coins() ? "+" : "-") + String.format(java.util.Locale.ROOT, "%,d", recipe.coins()) + " coins");
             }
             for (Map.Entry<String, Integer> mat : recipe.mats().entrySet()) {
                 int have = count(player, mat.getKey());
@@ -566,7 +813,7 @@ final class Market implements Listener {
         }
         view.set(49, icon(Material.BOOK, "How gear works", NamedTextColor.YELLOW, List.of(
                 "Damage, Strength, Crit and Defense change every hit.",
-                "Undead Sword: double damage to zombies & skeletons.",
+                "Barrow Blade: double damage to the undead.",
                 "Gear lives in your on-chain SkyWord bag.",
                 "Coins and materials spent here leave the game (sink).")), null);
         player.openInventory(view.getInventory());
@@ -695,7 +942,7 @@ final class Market implements Listener {
             }
         });
         view.set(14, icon(Material.GOLD_INGOT, "Sell to Merchant", NamedTextColor.GOLD, List.of(
-                "$" + product.npc() + " coins each (" + String.format("%,d", (long) have * product.npc()) + " total)", "!Click to sell all")), click -> {
+                "$" + product.npc() + " coins each (" + String.format(java.util.Locale.ROOT, "%,d", (long) have * product.npc()) + " total)", "!Click to sell all")), click -> {
             sellToMerchant(player, product);
             openProduct(player, product);
         });

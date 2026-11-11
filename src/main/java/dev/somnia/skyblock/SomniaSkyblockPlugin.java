@@ -28,6 +28,11 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     private SkillChain skillChain;
     private Chat chat;
     private SbMenu menu;
+    private CraftGui craft;
+
+    CraftGui craft() {
+        return craft;
+    }
     private Minions minions;
     private IslandGuide guide;
     private SbAdmin admin;
@@ -92,8 +97,13 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(skillChain, this);
         getServer().getPluginManager().registerEvents(chat, this);
         getServer().getPluginManager().registerEvents(menu, this);
+        TabList tab = new TabList(this);
+        getServer().getPluginManager().registerEvents(tab, this);
+        tab.start();
+        craft = new CraftGui(this);
+        getServer().getPluginManager().registerEvents(craft, this);
         getServer().getPluginManager().registerEvents(minions, this);
-        for (String name : new String[]{"sbmenu", "skills", "collection", "calendar", "warp"}) {
+        for (String name : new String[]{"sbmenu", "skills", "collection", "calendar", "warp", "levels"}) {
             if (getCommand(name) == null) {
                 throw new IllegalStateException("plugin.yml has no command /" + name);
             }

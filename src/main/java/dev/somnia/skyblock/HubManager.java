@@ -724,7 +724,7 @@ final class HubManager implements Listener {
                     plugin.arena().open(player);
                 }
             }
-            case "Fisher Hale", "Farmer Odo", "Woodward Fenn" -> plugin.market().openMerchant(player);
+            case "Fisher Hale", "Farmer Odo", "Woodward Fenn" -> plugin.market().openMerchant(player, name);
             case "Arcanist Ysolde" -> player.sendMessage(Component.text("[NPC] Arcanist Ysolde: Somnia's VRF decides every rare Colosseum drop, and no one, not even me, can bend the dice. Win ranked runs and check /realm for the proof.", NamedTextColor.LIGHT_PURPLE));
             case "Island Keeper" -> {
                 Profile profile = plugin.profiles().get(player.getUniqueId());
@@ -733,7 +733,7 @@ final class HubManager implements Listener {
                 player.sendMessage(Component.text("You are on your island. /hub brings you back.", NamedTextColor.GREEN));
             }
             case "Blacksmith" -> plugin.market().openShop(player);
-            case "Merchant" -> plugin.market().openMerchant(player);
+            case "Merchant" -> plugin.market().openMerchant(player, name);
             case "Foreman Brak" -> player.sendMessage(Component.text("[NPC] Foreman Brak: " + name("mine") + "'s veins grow back. Coal and iron in the galleries, gold up on " + name("mountain") + ". The way down leads to " + name("crypts") + ". Bring a sword.", NamedTextColor.YELLOW));
             default -> player.sendMessage(Component.text("[NPC] " + name + ": Hello!", NamedTextColor.YELLOW));
         }
@@ -747,7 +747,7 @@ final class HubManager implements Listener {
             case "auction" -> plugin.market().openAuctions(player);
             case "bank" -> plugin.market().openBank(player);
             case "blacksmith" -> plugin.market().openShop(player);
-            case "merchant" -> plugin.market().openMerchant(player);
+            case "merchant" -> plugin.market().openMerchant(player, npc.name());
             case "island" -> {
                 Profile profile = plugin.profiles().get(player.getUniqueId());
                 plugin.islands().ensureIsland(profile);
@@ -1573,8 +1573,10 @@ final class HubManager implements Listener {
     private void skill(Player player, Material type, boolean hub) {
         String n = type.name();
         if (CROPS.contains(type)) {
-            long xp = type == Material.MELON || type == Material.PUMPKIN || type == Material.NETHER_WART || type == Material.COCOA ? 5 : 4;
-            plugin.skills().add(player, Skills.Skill.FARMING, xp);
+            // Wiki Farming XP per block broken: wheat/carrot/potato/melon/cocoa/nether wart 4, pumpkin 4.5,
+            // sugar cane and cactus 2. Beetroot 4 is ours.
+            long tenths = type == Material.PUMPKIN ? 45 : type == Material.SUGAR_CANE || type == Material.CACTUS ? 20 : 40;
+            plugin.skills().addTenths(player, Skills.Skill.FARMING, tenths);
             if (hub) {
                 plugin.quests().hit(player, "hub_crop", 1);
             }
@@ -1595,8 +1597,9 @@ final class HubManager implements Listener {
         } else if (isStone(type)) {
             plugin.skills().add(player, Skills.Skill.MINING, type.name().contains("DEEPSLATE") ? 2 : 1);
         } else {
-            long xp = n.contains("DIAMOND") ? 20 : n.contains("EMERALD") ? 15 : n.contains("GOLD") ? 12
-                    : n.contains("REDSTONE") || n.contains("LAPIS") ? 10 : n.contains("IRON") ? 8 : n.contains("COPPER") ? 6 : 5;
+            // Wiki Mining XP: coal / iron / quartz 5, gold 6, redstone / lapis 7, emerald 9, diamond 10. Copper 6 is ours.
+            long xp = n.contains("DIAMOND") ? 10 : n.contains("EMERALD") ? 9 : n.contains("GOLD") ? 6
+                    : n.contains("REDSTONE") || n.contains("LAPIS") ? 7 : n.contains("IRON") ? 5 : n.contains("COPPER") ? 6 : 5;
             plugin.skills().add(player, Skills.Skill.MINING, xp);
             if (hub) {
                 plugin.quests().hit(player, "hub_ore", 1);
