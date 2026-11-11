@@ -42,8 +42,14 @@ commands:
     description: Show your purse address
     usage: /deposit
   withdraw:
-    description: Send STT from your purse
-    usage: /withdraw <amount> <address>
+    description: Send STT or the Voidstep Blade in hand from your purse to a main wallet
+    usage: /withdraw <amount> <address> | /withdraw blade <address>
+  exportkey:
+    description: Get the private key of your game wallet (needs your password; every later write is server-signed)
+    usage: /exportkey confirm <password>
+  deposit-nft:
+    description: Bring a Voidstep Blade back from your game wallet into the game
+    usage: /deposit-nft <serial>
   trade:
     description: Trade items with another player
     usage: /trade <player>

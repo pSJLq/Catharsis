@@ -12,16 +12,17 @@ chain:
     - "https://rpc.ankr.com/somnia_testnet"
     - "https://50312.rpc.thirdweb.com"
   chain-id: 50312
-  profile-contract: "0xeB97b719A39722D678418a0f87e6f5bEd8016bA0"
-  hold-contract: "0x26cf755903bA760d90363d5a74C9e877259603F3"
-  gear-contract: "0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8"
-  word-contract: "0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c"
-  aotv-contract: "0x378D4201ce775263f101EB5eC4A63d2E5d669c24"
-  realm-contract: "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d"
-  bin-contract: "0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638"
-  skills-contract: "0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf"
-  skills-contract-v1: "0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a"
-  gas-limit: 8000000
+  old-realm-contract: "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d"
+  keys-contract: "0x75B33d1FFd2cb793Cca8280B8E80762339927B3b"
+  profile-contract: "0xaCced5efB1762DfAF2587723c9dC07256fa4eb60"
+  hold-contract: "0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f"
+  gear-contract: "0x67e01A054Dbe23d45695F737a77768d4a842c4b0"
+  word-contract: "0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405"
+  aotv-contract: "0x248a3A61F1227774D4fCeA15e1725CA95dAbF632"
+  realm-contract: "0xE124dD8443c1bF2045E1376f5fe3E277Dcd31c8a"
+  bin-contract: "0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3"
+  skills-contract: "0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d"
+  skills-version: 3  gas-limit: 8000000
   max-fee-gwei: 20         # cap; the fee itself follows eth_gasPrice (+ a safety margin)
 
 # Login with a limbo (Auth). Purse keys are sealed with the player's password (Argon2id + AES-256-GCM).

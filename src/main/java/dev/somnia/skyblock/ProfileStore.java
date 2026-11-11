@@ -83,6 +83,7 @@ final class ProfileStore {
         profile.walletEnc = yaml.getString("wallet-enc");
         profile.walletPending = yaml.getString("wallet-pending");
         profile.walletOrphaned = yaml.getString("wallet-enc-orphaned");
+        profile.keyExported = yaml.getBoolean("key-exported", false);
         profile.lastWorld = yaml.getString("last-world");
         profile.lastPos = doubles(yaml.getDoubleList("last-pos"), 5);
         String plain = yaml.getString("wallet-key", "");
@@ -178,6 +179,7 @@ final class ProfileStore {
         yaml.set("wallet-enc", profile.walletEnc);
         yaml.set("wallet-pending", profile.walletPending);
         yaml.set("wallet-enc-orphaned", profile.walletOrphaned);
+        yaml.set("key-exported", profile.keyExported ? Boolean.TRUE : null);
         yaml.set("last-world", profile.lastWorld);
         yaml.set("last-pos", profile.lastPos == null ? null : java.util.Arrays.stream(profile.lastPos).boxed().toList());
         yaml.set("hold-ready", profile.holdReady);

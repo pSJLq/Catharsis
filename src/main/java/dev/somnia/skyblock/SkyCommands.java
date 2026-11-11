@@ -58,11 +58,20 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
                     ? "Send STT here. Breaks and teleports happen now and roll back if the signature fails. You pay the gas. /withdraw <amount> <address>"
                     : "Send STT here. Breaks stay instant. You pay the gas. /withdraw <amount> <address>";
             player.sendMessage(Component.text(hint, NamedTextColor.GRAY));
+            player.sendMessage(Component.text(profile.keyExported
+                    ? "Wallet key: exported. Every write from it carries a server signature."
+                    : "Wallet key: kept on the server. /exportkey gives it to you.", NamedTextColor.DARK_GRAY));
             tellBalance(player, profile);
             return true;
         }
         if (name.equals("withdraw")) {
+            if (args.length >= 1 && (args[0].equalsIgnoreCase("blade") || args[0].equalsIgnoreCase("nft"))) {
+                return withdrawBlade(player, args);
+            }
             return withdraw(player, profile, args);
+        }
+        if (name.equals("deposit-nft")) {
+            return depositNft(player, args);
         }
         if (name.equals("trade")) {
             return plugin.trades().command(player, args);
@@ -108,9 +117,43 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /** /withdraw blade <address>: the Voidstep Blade NFT in hand moves to a main wallet (no key export, server-attested). */
+    private boolean withdrawBlade(Player player, String[] args) {
+        if (args.length != 2 || !args[1].matches("(?i)0x[0-9a-f]{40}")) {
+            player.sendMessage(Component.text("Usage: /withdraw blade <address>  (hold the Voidstep Blade)", NamedTextColor.YELLOW));
+            return true;
+        }
+        if (plugin.words() == null) {
+            player.sendMessage(Component.text("NFT withdraws are not available on this server.", NamedTextColor.RED));
+            return true;
+        }
+        plugin.words().withdrawBlade(player, args[1]);
+        return true;
+    }
+
+    /** /deposit-nft <serial>: brings a Voidstep Blade back after it is sent to the game wallet. */
+    private boolean depositNft(Player player, String[] args) {
+        long serial;
+        try {
+            serial = args.length == 1 ? Long.parseLong(args[0].replace("#", "")) : -1;
+        } catch (NumberFormatException exception) {
+            serial = -1;
+        }
+        if (serial <= 0) {
+            player.sendMessage(Component.text("Usage: /deposit-nft <serial>. Send the blade to your game wallet (/deposit) first.", NamedTextColor.YELLOW));
+            return true;
+        }
+        if (plugin.words() == null) {
+            player.sendMessage(Component.text("NFT deposits are not available on this server.", NamedTextColor.RED));
+            return true;
+        }
+        plugin.words().depositBlade(player, serial);
+        return true;
+    }
+
     private boolean withdraw(Player player, Profile profile, String[] args) {
         if (args.length != 2) {
-            player.sendMessage(Component.text("Usage: /withdraw <amount> <address>", NamedTextColor.YELLOW));
+            player.sendMessage(Component.text("Usage: /withdraw <amount> <address>  or  /withdraw blade <address>", NamedTextColor.YELLOW));
             return true;
         }
         BigDecimal amount;
@@ -123,7 +166,7 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
         String to = args[1];
         plugin.profiles().save(profile);
         UUID id = player.getUniqueId();
-        player.sendMessage(Component.text("Signing the withdraw from your purse.", NamedTextColor.GRAY));
+        player.sendMessage(Component.text("Signing the withdraw from your purse. Waiting for the receipt...", NamedTextColor.GRAY));
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             String hash = null;
             String error = null;
@@ -133,7 +176,7 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
                 error = exception.getMessage();
             }
             String sent = hash;
-            String line = sent == null ? error : "Sent. " + sent;
+            String line = sent == null ? error : "Sent " + amount.stripTrailingZeros().toPlainString() + " STT to " + to + ". Confirmed onchain: " + sent;
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 Player online = plugin.getServer().getPlayer(id);
                 if (online != null) {

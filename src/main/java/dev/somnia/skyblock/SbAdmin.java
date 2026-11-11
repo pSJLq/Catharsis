@@ -22,7 +22,7 @@ import java.util.List;
  * deletes the file and writes the result to control/last.txt. Nothing listens on the network for this.
  */
 final class SbAdmin implements CommandExecutor, TabCompleter {
-    private static final List<String> ACTIONS = List.of("stop", "save-off", "save-on", "save", "status", "unregister", "deploy-skills", "deploy-skills2", "reset-skills");
+    private static final List<String> ACTIONS = List.of("stop", "save-off", "save-on", "save", "status", "unregister", "deploy-skills", "deploy-skills2", "reset-skills", "holo");
     private final SomniaSkyblockPlugin plugin;
     private final File control;
     private boolean stopping;
@@ -96,7 +96,7 @@ final class SbAdmin implements CommandExecutor, TabCompleter {
                 plugin.skillChain().deploy(who, line -> note("deploy-skills: " + line));
             }
         }
-        for (String action : List.of("stop", "save-off", "save-on", "save", "status")) {
+        for (String action : List.of("stop", "save-off", "save-on", "save", "status", "holo")) {
             File flag = new File(control, action);
             if (flag.exists()) {
                 if (!flag.delete()) {
@@ -182,6 +182,11 @@ final class SbAdmin implements CommandExecutor, TabCompleter {
 
     private String run(String action, CommandSender sender) {
         switch (action) {
+            case "holo" -> {
+                String census = Npcs.census();
+                plugin.getLogger().info("NPC label census: " + census);
+                return census;
+            }
             case "save" -> {
                 saveAll();
                 return "Saved all worlds and profiles.";

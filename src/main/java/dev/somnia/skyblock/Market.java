@@ -374,6 +374,7 @@ final class Market implements Listener {
     @EventHandler
     public void onJoin(SbLoginEvent event) {
         UUID id = event.getPlayer().getUniqueId();
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> plugin.realm().claimRefund(id), 200L);
         if (!stash.containsKey(id)) {
             return;
         }
@@ -1332,8 +1333,9 @@ final class Market implements Listener {
                     if (previous != null && !previous.equals(bidder)) {
                         Player old = plugin.getServer().getPlayer(previous);
                         if (old != null) {
-                            old.sendMessage(Component.text("[AH] You were outbid on " + label(lot.key) + ". SkyRealm refunded your STT.", NamedTextColor.YELLOW));
+                            old.sendMessage(Component.text("[AH] You were outbid on " + label(lot.key) + ". Your STT is coming back to your purse.", NamedTextColor.YELLOW));
                         }
+                        plugin.getServer().getScheduler().runTaskLater(plugin, () -> plugin.realm().claimRefund(previous), 40L);
                     }
                     Player seller = plugin.getServer().getPlayer(lot.seller);
                     if (seller != null) {

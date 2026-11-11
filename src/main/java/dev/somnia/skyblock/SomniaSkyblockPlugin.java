@@ -139,7 +139,15 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         bind("craft", commands);
         bind("deposit", commands);
         bind("withdraw", commands);
+        bind("deposit-nft", commands);
         bind("trade", commands);
+        if (getCommand("exportkey") == null) {
+            throw new IllegalStateException("plugin.yml has no command /exportkey");
+        }
+        KeyExport keyExport = new KeyExport(this);
+        getCommand("exportkey").setExecutor(keyExport);
+        getCommand("exportkey").setTabCompleter(keyExport);
+        getServer().getPluginManager().registerEvents(keyExport, this);
 
         getServer().getScheduler().runTask(this, this::startWorld);
     }

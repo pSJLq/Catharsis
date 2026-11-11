@@ -309,6 +309,13 @@ final class SkillChain implements Listener {
                 long chain = Math.max(0, xp[i] - profile.skillsBase[i]);
                 long local = Skills.xp(profile, skill);
                 long pend = profile.pendingXp[i];
+                if (!migrate && suspicious(chain + pend, local)) {
+                    long over = chain + pend - local;
+                    plugin.getLogger().warning("Chain sanity: " + wallet + " " + skill + " XP reads " + (chain + pend)
+                            + " onchain but the server copy is " + local + "; using the lower value.");
+                    profile.skillsBase[i] += over;
+                    chain -= over;
+                }
                 if (migrate && local > chain + pend) {
                     migratedXp += local - chain - pend;
                     pend = local - chain;
@@ -321,6 +328,13 @@ final class SkillChain implements Listener {
                 long chain = Math.max(0, col[i] - profile.colBase[i]);
                 long local = Collects.amount(profile, entry);
                 long pend = profile.pendingCol[i];
+                if (!migrate && suspicious(chain + pend, local)) {
+                    long over = chain + pend - local;
+                    plugin.getLogger().warning("Chain sanity: " + wallet + " collection " + entry.key() + " reads " + (chain + pend)
+                            + " onchain but the server copy is " + local + "; using the lower value.");
+                    profile.colBase[i] += over;
+                    chain -= over;
+                }
                 if (migrate && local > chain + pend) {
                     migratedCol += local - chain - pend;
                     pend = local - chain;
@@ -343,6 +357,19 @@ final class SkillChain implements Listener {
             plugin.stats().markDirty(player);
         }
         plugin.getLogger().info("Skills loaded from chain for " + wallet + (migrate ? " (one-time migration queued: " + migratedXp + " XP, " + migratedCol + " collection)" : ""));
+    }
+
+    /**
+     * Load-time sanity check: the chain may only be ahead of the server's own copy by a few batches
+     * (a crash between a landed batch and the YAML save). More than that is treated as foreign data:
+     * the lower value wins and the gap is kept as an offset so later batches stay consistent.
+     */
+    static boolean suspicious(long chainTotal, long local) {
+        if (chainTotal > 50_000_000_000L) {
+            return true;
+        }
+        long tolerance = Math.max(2_000L, local / 20);
+        return chainTotal > local + tolerance;
     }
 
     // ------------------------------------------------------------------ 4 s batch

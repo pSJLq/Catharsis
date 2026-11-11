@@ -106,6 +106,31 @@ final class RealmChain {
         });
     }
 
+    /** Pulls outbid refunds (SkyRealm2 credits them instead of pushing, so no bidder can block an auction). */
+    void claimRefund(UUID owner) {
+        Profile profile = plugin.profiles().get(owner);
+        if (!enabled() || profile.wallet == null || profile.wallet.isBlank() || !plugin.wallets().canSign(profile)) {
+            return;
+        }
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                BigInteger due = plugin.wallets().pendingRefund(profile.wallet);
+                if (due.signum() <= 0) {
+                    return;
+                }
+                TransactionReceipt receipt = plugin.wallets().sendTo(profile, address(), fn("withdrawPending"), BigInteger.ZERO);
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    Player now = plugin.getServer().getPlayer(owner);
+                    if (now != null) {
+                        now.sendMessage(txLine("[AH] Refunded " + stt(due) + " STT from outbid auctions.", receipt.getTransactionHash()));
+                    }
+                });
+            } catch (Exception exception) {
+                plugin.getLogger().info("Refund claim skipped for " + owner + ": " + reason(exception));
+            }
+        });
+    }
+
     void view(Function function, Consumer<List<Type>> ok, Consumer<String> fail) {
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {

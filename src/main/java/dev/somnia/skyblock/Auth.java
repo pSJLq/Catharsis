@@ -783,6 +783,55 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         err(player, "Wrong password. " + (maxAttempts() - count) + " attempt(s) left.");
     }
 
+    /**
+     * Re-checks the password of a logged-in player (same attempt counter and lockout as /login) and hands the
+     * decrypted purse key to {@code ok} on the main thread. The caller must wipe the array. Nothing is logged.
+     */
+    void verifyPassword(Player player, String password, java.util.function.Consumer<byte[]> ok) {
+        UUID id = player.getUniqueId();
+        Profile profile = plugin.profiles().get(id);
+        if (!authed.contains(id) || profile.walletEnc == null || profile.wallet == null || profile.wallet.isBlank()) {
+            err(player, "Log in first.");
+            return;
+        }
+        long until = Math.max(lockedUntil.getOrDefault("n:" + player.getName().toLowerCase(Locale.ROOT), 0L),
+                lockedUntil.getOrDefault("i:" + ip(player), 0L));
+        if (until > System.currentTimeMillis()) {
+            err(player, "Too many wrong passwords. Try again later.");
+            return;
+        }
+        if (!busy.add(id)) {
+            return;
+        }
+        String blob = profile.walletEnc;
+        String wallet = profile.wallet;
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            byte[] secret = null;
+            boolean good;
+            try {
+                secret = KeyVault.open(blob, password, KeyVault.aad(id, wallet));
+                good = Credentials.create(ECKeyPair.create(secret)).getAddress().equalsIgnoreCase(wallet);
+            } catch (GeneralSecurityException | RuntimeException e) {
+                good = false;
+            }
+            boolean pass = good;
+            byte[] key = secret;
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                busy.remove(id);
+                if (!pass || !player.isOnline()) {
+                    if (key != null) {
+                        Arrays.fill(key, (byte) 0);
+                    }
+                    if (!pass && player.isOnline()) {
+                        wrong(player);
+                    }
+                    return;
+                }
+                ok.accept(key);
+            });
+        });
+    }
+
     private void changePassword(Player player, String[] args) {
         UUID id = player.getUniqueId();
         Profile profile = plugin.profiles().get(id);
@@ -797,6 +846,12 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         String problem = weak(player, args[1]);
         if (problem != null) {
             err(player, problem);
+            return;
+        }
+        long lockedFor = Math.max(lockedUntil.getOrDefault("n:" + player.getName().toLowerCase(Locale.ROOT), 0L),
+                lockedUntil.getOrDefault("i:" + ip(player), 0L));
+        if (lockedFor > System.currentTimeMillis()) {
+            err(player, "Too many wrong passwords. Try again later.");
             return;
         }
         if (!busy.add(id)) {
@@ -822,7 +877,10 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 busy.remove(id);
                 if (result == null) {
-                    err(player, "Your old password is wrong.");
+                    // Same attempt counter and lockout as /login.
+                    if (player.isOnline()) {
+                        wrong(player);
+                    }
                     return;
                 }
                 profile.walletEnc = result;

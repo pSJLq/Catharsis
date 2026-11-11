@@ -34,17 +34,27 @@ Deployer (public EOA, not a key): [`0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6`]
 
 | Contract | Address | Role |
 | --- | --- | --- |
-| SkyIsland | [`0xeB97b719A39722D678418a0f87e6f5bEd8016bA0`](https://explorer.testnet.somnia.network/address/0xeB97b719A39722D678418a0f87e6f5bEd8016bA0) | Island deed and membership |
-| SkyWord | [`0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c`](https://explorer.testnet.somnia.network/address/0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c) | Inventory (packed bag words) |
-| SkySkills2 | [`0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf`](https://explorer.testnet.somnia.network/address/0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf) | Skills and collections (current). Profile epochs and `resetProfile`. [Deploy tx](https://explorer.testnet.somnia.network/tx/0x6af8858630f40fe58616d92367d40e90d50ebc08dafb7a88b1cde27ea76e23b1) (2026-11-10) |
-| SkySkills (v1, deprecated) | [`0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a`](https://explorer.testnet.somnia.network/address/0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a) | Add-only predecessor. Kept for history after the v2 migration. |
-| SkyHold | [`0x26cf755903bA760d90363d5a74C9e877259603F3`](https://explorer.testnet.somnia.network/address/0x26cf755903bA760d90363d5a74C9e877259603F3) | Held items / equipment slots |
-| SkyGear | [`0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8`](https://explorer.testnet.somnia.network/address/0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8) | Unique gear tokens |
-| AOTV | [`0x378D4201ce775263f101EB5eC4A63d2E5d669c24`](https://explorer.testnet.somnia.network/address/0x378D4201ce775263f101EB5eC4A63d2E5d669c24) | Aspect of the Void token |
-| SkyRealm | [`0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d`](https://explorer.testnet.somnia.network/address/0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d) | Bazaar, auctions, arena runs, Relic Pool |
-| SkyBin | [`0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638`](https://explorer.testnet.somnia.network/address/0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638) | Buy-It-Now listings |
+| SkyKeys | [`0x75B33d1FFd2cb793Cca8280B8E80762339927B3b`](https://explorer.testnet.somnia.network/address/0x75B33d1FFd2cb793Cca8280B8E80762339927B3b) | One-way flag for wallets whose key was exported (mode B). Deployed 2026-11-11. |
+| SkyIsland2 | [`0xaCced5efB1762DfAF2587723c9dC07256fa4eb60`](https://explorer.testnet.somnia.network/address/0xaCced5efB1762DfAF2587723c9dC07256fa4eb60) | Island deed and membership (attested). Migrated from SkyIsland. |
+| SkyWord2 | [`0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405`](https://explorer.testnet.somnia.network/address/0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405) | Inventory (packed bag words). Slot 9 of the hotbar can never hold an item. |
+| SkySkills3 | [`0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d`](https://explorer.testnet.somnia.network/address/0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d) | Skills and collections (current). Caps of 1,000,000 per entry and 20,000,000 per hour. |
+| SkyHold2 | [`0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f`](https://explorer.testnet.somnia.network/address/0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f) | Held items / equipment slots |
+| SkyGear2 | [`0x67e01A054Dbe23d45695F737a77768d4a842c4b0`](https://explorer.testnet.somnia.network/address/0x67e01A054Dbe23d45695F737a77768d4a842c4b0) | Unique gear tokens |
+| AOTV2 | [`0x248a3A61F1227774D4fCeA15e1725CA95dAbF632`](https://explorer.testnet.somnia.network/address/0x248a3A61F1227774D4fCeA15e1725CA95dAbF632) | Aspect of the Void token |
+| SkyRealm2 | [`0xE124dD8443c1bF2045E1376f5fe3E277Dcd31c8a`](https://explorer.testnet.somnia.network/address/0xE124dD8443c1bF2045E1376f5fe3E277Dcd31c8a) | Bazaar, auctions, arena runs, Relic Pool |
+| SkyBin2 | [`0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3`](https://explorer.testnet.somnia.network/address/0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3) | Buy-It-Now listings |
 
 The plugin default config ships public RPC URLs and these addresses. Operator-only fields (admin accounts) are left empty. See [docs/contracts.md](docs/contracts.md).
+
+Previous contracts (SkyIsland `0xeB97…6bA0`, SkyWord `0x699C…684c`, SkySkills2 `0x287b…BcEf`, SkySkills v1 `0x81f5…854a`, SkyHold `0x26cf…03F3`, SkyGear `0x4f63…E1d8`, AOTV `0x378D…9c24`, SkyRealm `0xEE46…C59d`, SkyBin `0xCfA5…d638`) were migrated on 2026-11-11 and closed; they stay onchain for history.
+
+## Wallet keys: two modes
+
+- **Key kept on the server (default).** Routine writes (inventory, XP, stats) need no server signature and cost normal gas. Onchain caps still apply.
+- **Key exported (`/exportkey confirm <password>`).** The wallet is first marked in **SkyKeys** (one-way), then the key is shown to you only. After that every write from that wallet needs a server attestation (EIP-712, `Catharsis` v1), so the key cannot be used to write game state around the server.
+- NFT mints and moves, bazaar, auctions, arena and island deeds are server-attested in both modes.
+
+Measured gas (Shannon, same call): see docs/gas.md.
 
 ## How the onchain loop works
 

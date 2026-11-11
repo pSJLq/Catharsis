@@ -1,0 +1,7 @@
+# Public EVM contract/wallet addresses (20 bytes, 40 hex) are not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "public 20-byte addresses"
+regexes = ['''^['"]?0x[0-9a-fA-F]{40}['"]?$''']

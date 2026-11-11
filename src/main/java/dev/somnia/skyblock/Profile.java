@@ -33,6 +33,8 @@ final class Profile {
     String walletEnc;
     /** Old plaintext key sealed under the temporary migration key until the player runs /register. */
     String walletPending;
+    /** /exportkey done: the purse is in mode B (SkyKeys flag set onchain before the key was shown). */
+    boolean keyExported;
     /** Blob kept (unusable) after /sbadmin unregister, with the old purse address. */
     String walletOrphaned;
     transient boolean migratedNow;

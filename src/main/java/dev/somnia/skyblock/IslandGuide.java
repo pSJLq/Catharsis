@@ -86,7 +86,7 @@ final class IslandGuide implements Listener {
         }
         String skin = plugin.getConfig().getString("npc-skins.guide", "default:alex:slim");
         Npcs.Spawned made = Npcs.spawn(world, base, TAG, "Wren the Island Guide", NamedTextColor.YELLOW, skin, plugin.getLogger());
-        spawned.put(profile.uuid, new UUID[]{made.body(), made.label()});
+        spawned.put(profile.uuid, new UUID[]{made.body(), made.label(), made.nameLine()});
     }
 
     /** A free standing spot a few blocks from the island spawn, found by scanning down. */
@@ -117,6 +117,26 @@ final class IslandGuide implements Listener {
             }
         }
         return null;
+    }
+
+    /** Old (browser) clients: hide our name line, the Mannequin's own nametag shows the name there. */
+    @EventHandler
+    public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                Npcs.hideNameLinesFor(player);
+            }
+        }, 10L);
+    }
+
+    /** NPC labels are never saved; any that come back from disk (older builds, a crash) are leftovers. */
+    @EventHandler
+    public void onEntitiesLoad(org.bukkit.event.world.EntitiesLoadEvent event) {
+        int removed = Npcs.removeLeftovers(event.getEntities(), null);
+        if (removed > 0) {
+            plugin.getLogger().info("Removed " + removed + " leftover NPC label(s) in " + event.getWorld().getName() + ".");
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)

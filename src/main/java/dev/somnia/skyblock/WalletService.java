@@ -56,8 +56,7 @@ final class WalletService {
     private final long chainId;
     private final File secretsFile;
     private final String deployerAddress;
-    private final String deployerKey;
-    private boolean deployerClaimed;
+    private final Attestor attestor;
     private final Object sendLock = new Object();
     private final Map<String, Lane> lanes = new ConcurrentHashMap<>();
     private final Map<String, BigInteger> castGas = new ConcurrentHashMap<>();
@@ -79,8 +78,21 @@ final class WalletService {
         this.secretsFile = new File(plugin.getDataFolder(), "secrets.yml");
         YamlConfiguration yaml = YamlConfiguration.loadConfiguration(secretsFile);
         this.deployerAddress = yaml.getString("deployer-address", "");
-        this.deployerKey = yaml.getString("deployer-key", "");
-        this.deployerClaimed = yaml.getBoolean("deployer-claimed");
+        String signerKey = yaml.getString("signer-key", "");
+        Attestor made = null;
+        if (signerKey == null || signerKey.isBlank()) {
+            plugin.getLogger().severe("secrets.yml has no signer-key: hardened contracts will reject every write.");
+        } else {
+            try {
+                made = new Attestor(signerKey.trim(), chainId, plugin.getLogger());
+                plugin.getLogger().info("Server attestation signer " + made.address());
+                made.benchmark(50);
+                plugin.getLogger().info(String.format(Locale.ROOT, "Attest self-test: %.3f ms per signature (local, no RPC)", made.benchmark(500)));
+            } catch (Exception exception) {
+                plugin.getLogger().severe("signer-key in secrets.yml is not a valid key.");
+            }
+        }
+        this.attestor = made;
         if (deployerAddress == null || deployerAddress.isBlank()) {
             plugin.getLogger().warning("secrets.yml has no deployer address.");
         } else {
@@ -96,13 +108,8 @@ final class WalletService {
     void ensure(Profile profile) {
     }
 
-    /** A new purse key (32 bytes). The first one ever claims the deployer purse, as before. */
+    /** A fresh purse key (32 bytes) for every new player. The deployer key is never handed out. */
     byte[] newPurseKey() {
-        if (!deployerClaimed && deployerKey != null && !deployerKey.isBlank()) {
-            deployerClaimed = true;
-            saveClaimed();
-            return Numeric.toBytesPadded(Numeric.toBigInt(deployerKey), 32);
-        }
         try {
             ECKeyPair pair = Keys.createEcKeyPair();
             return Numeric.toBytesPadded(pair.getPrivateKey(), 32);
@@ -129,6 +136,7 @@ final class WalletService {
         return format(wei);
     }
 
+    /** Sends STT and waits for the receipt; returns the hash only when status is 1, throws otherwise. */
     String withdraw(Profile profile, String to, BigDecimal amount) throws IOException {
         if (!canSign(profile)) {
             throw new IllegalStateException("This player is not logged in.");
@@ -144,15 +152,19 @@ final class WalletService {
         BigInteger balance = web3.ethGetBalance(credentials.getAddress(), DefaultBlockParameterName.LATEST).send().getBalance();
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;
-        BigInteger fee = GAS_LIMIT.multiply(maxFee);
+        // Somnia prices a plain transfer to a never-funded address far above 21000 (about 631k gas), so the limit
+        // always comes from eth_estimateGas + 20%; a hardcoded 21000 made those withdraws revert out of gas.
+        BigInteger gas = transferGas(credentials.getAddress(), to, value);
+        BigInteger fee = gas.multiply(maxFee);
         if (balance.compareTo(value.add(fee)) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This needs " + format(value) + " plus " + format(fee) + " STT for gas.");
         }
         // Same per-purse nonce lane as every contract write, so a withdraw never collides with bag, skill, or island txs.
         Lane lane = lanes.computeIfAbsent(credentials.getAddress().toLowerCase(Locale.ROOT), ignored -> new Lane());
+        String hash;
         synchronized (lane.lock) {
             BigInteger nonce = nextNonce(lane, credentials.getAddress());
-            RawTransaction transaction = RawTransaction.createEtherTransaction(chainId, nonce, GAS_LIMIT, to, value, priority, maxFee);
+            RawTransaction transaction = RawTransaction.createEtherTransaction(chainId, nonce, gas, to, value, priority, maxFee);
             byte[] signed = TransactionEncoder.signMessage(transaction, chainId, credentials);
             EthSendTransaction sent = web3.ethSendRawTransaction(Numeric.toHexString(signed)).send();
             if (sent.hasError()) {
@@ -162,8 +174,42 @@ final class WalletService {
                 throw new IllegalStateException(sent.getError().getMessage());
             }
             lane.next = nonce.add(BigInteger.ONE);
-            return sent.getTransactionHash();
+            hash = sent.getTransactionHash();
         }
+        plugin.getLogger().info("Withdraw sent " + hash + " gas limit " + gas + " from " + credentials.getAddress());
+        TransactionReceipt receipt;
+        try {
+            receipt = waitReceipt(hash, 240);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Withdraw " + hash + " was sent, but its receipt could not be read (" + exception.getMessage() + "). Check the explorer before trying again.");
+        }
+        if (receipt == null) {
+            throw new IllegalStateException("Withdraw " + hash + " has no receipt after 60 s. Check the explorer before trying again.");
+        }
+        BigInteger used = receipt.getGasUsed();
+        plugin.getLogger().info("Withdraw " + hash + " status " + receipt.getStatus() + " gas used " + used + " of " + gas);
+        if (!receipt.isStatusOK()) {
+            String why = used != null && used.compareTo(gas) >= 0 ? "it ran out of gas" : "Shannon reverted it";
+            throw new IllegalStateException("Withdraw failed: " + why + " (" + hash + "). Your STT was not sent; only the gas fee was spent.");
+        }
+        return hash;
+    }
+
+    /** eth_estimateGas for a plain STT transfer, +20%, at least 21000 and at most GAS_CAP. Never guesses: no estimate, no send. */
+    private BigInteger transferGas(String from, String to, BigInteger value) throws IOException {
+        EthEstimateGas estimated = web3.ethEstimateGas(new Transaction(from, null, null, null, to, value, null)).send();
+        if (estimated.hasError() || estimated.getAmountUsed() == null || estimated.getAmountUsed().signum() <= 0) {
+            String why = estimated.hasError() ? trim(estimated.getError().getMessage()) : "no estimate";
+            throw new IllegalStateException("Shannon could not estimate this transfer (" + why + "). Nothing was sent.");
+        }
+        BigInteger gas = estimated.getAmountUsed().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
+        if (gas.compareTo(GAS_LIMIT) < 0) {
+            gas = GAS_LIMIT;
+        }
+        if (gas.compareTo(GAS_CAP) > 0) {
+            throw new IllegalStateException("This transfer needs " + gas + " gas, above the " + GAS_CAP + " cap. Nothing was sent.");
+        }
+        return gas;
     }
 
     void close() {
@@ -334,6 +380,46 @@ final class WalletService {
         return sendPacked(profile, wordContract(), FunctionEncoder.encode(function));
     }
 
+    /** SkyWord2.withdrawNft(slot, to): the blade leaves the bag for the player's main wallet. */
+    TransactionReceipt withdrawNft(Profile profile, int slot, String to) throws Exception {
+        if (to == null || !to.matches("(?i)0x[0-9a-f]{40}")) {
+            throw new IllegalArgumentException("That is not an address.");
+        }
+        Function function = new Function(
+                "withdrawNft",
+                List.of(new Uint8(BigInteger.valueOf(slot)), new Address(to)),
+                Collections.emptyList()
+        );
+        return sendPacked(profile, wordContract(), FunctionEncoder.encode(function));
+    }
+
+    /** SkyWord2.depositNft(slot, serial): a blade the game wallet owns again goes back into the bag. */
+    TransactionReceipt depositNft(Profile profile, int slot, long serial) throws Exception {
+        Function function = new Function(
+                "depositNft",
+                List.of(new Uint8(BigInteger.valueOf(slot)), new Uint256(BigInteger.valueOf(serial))),
+                Collections.emptyList()
+        );
+        return sendPacked(profile, wordContract(), FunctionEncoder.encode(function));
+    }
+
+    String aotvOwner(long serial) throws IOException {
+        Function function = new Function("ownerOf", List.of(new Uint256(BigInteger.valueOf(serial))), Collections.emptyList());
+        String raw = call("0x0000000000000000000000000000000000000000", aotvContract(), function);
+        return "0x" + raw.substring(raw.length() - 40);
+    }
+
+    boolean aotvLocked(long serial) throws IOException {
+        Function function = new Function("locked", List.of(new Uint256(BigInteger.valueOf(serial))), Collections.emptyList());
+        return new BigInteger(1, Numeric.hexStringToByteArray(call("0x0000000000000000000000000000000000000000", aotvContract(), function))).signum() != 0;
+    }
+
+    /** SkyRealm2.pending(player): outbid refunds waiting to be pulled. */
+    BigInteger pendingRefund(String player) throws IOException {
+        Function function = new Function("pending", List.of(new Address(player)), Collections.emptyList());
+        return new BigInteger(1, Numeric.hexStringToByteArray(call("0x0000000000000000000000000000000000000000", realmContract(), function)));
+    }
+
     String submitCast(Profile profile, int slot) throws Exception {
         Function function = new Function(
                 "cast",
@@ -394,12 +480,13 @@ final class WalletService {
         return receipt;
     }
 
-    private String submitPacked(Profile profile, String to, String data, boolean cast) throws Exception {
+    private String submitPacked(Profile profile, String to, String plainData, boolean cast) throws Exception {
         if (!canSign(profile)) {
             throw new IllegalStateException("This player is not logged in.");
         }
         Credentials credentials = credentials(profile);
         String from = credentials.getAddress();
+        String data = attest(from, to, plainData, BigInteger.ZERO);
         String fromKey = from.toLowerCase(Locale.ROOT);
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;
@@ -608,11 +695,121 @@ final class WalletService {
         return rpc.activeUrl();
     }
 
-    private String sendData(Profile profile, String to, String data, long gasLimit) throws Exception {
+    /**
+     * Calldata with the server attestation appended (Attested.sol) when the write needs one. The player's purse
+     * still sends and pays. Mode A (key never exported): routine writes go bare, normal gas. Mode B (key exported,
+     * SkyKeys flag): everything is attested. When the mode is unknown the write is attested: the 76-byte trailer is
+     * ignored by a mode-A contract call, so attesting is always safe, skipping it is only done when sure.
+     */
+    String attest(String from, String to, String data, BigInteger value) {
+        if (attestor == null || to == null || to.isBlank()) {
+            return data;
+        }
+        if (Attestor.guarded(data) && modeA(from)) {
+            return data;
+        }
+        return attestor.wrap(from, to, data, value);
+    }
+
+    // ===== SkyKeys (two modes) =====
+    private static final long MODE_A_TTL_MS = 10 * 60_000L;
+    private final Map<String, Boolean> exportedCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> exportedAt = new ConcurrentHashMap<>();
+
+    String keysContract() {
+        String value = plugin.getConfig().getString("chain.keys-contract", "");
+        return value == null ? "" : value.trim();
+    }
+
+    /** True only when SkyKeys says this purse's key was never exported (cached; mode B is permanent). */
+    boolean modeA(String wallet) {
+        if (wallet == null || wallet.isBlank() || keysContract().isBlank()) {
+            return false;
+        }
+        String key = wallet.toLowerCase(Locale.ROOT);
+        Boolean known = exportedCache.get(key);
+        Long at = exportedAt.get(key);
+        if (known != null && (known || (at != null && System.currentTimeMillis() - at < MODE_A_TTL_MS))) {
+            return !known;
+        }
+        try {
+            boolean exported = keyExportedOnchain(wallet);
+            exportedCache.put(key, exported);
+            exportedAt.put(key, System.currentTimeMillis());
+            return !exported;
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    /** SkyKeys.exported(wallet), straight from the chain. */
+    boolean keyExportedOnchain(String wallet) throws IOException {
+        Function function = new Function("exported", List.of(new Address(wallet)), Collections.emptyList());
+        String raw = call("0x0000000000000000000000000000000000000000", keysContract(), function);
+        return raw != null && raw.length() > 2 && new BigInteger(1, Numeric.hexStringToByteArray(raw)).signum() != 0;
+    }
+
+    /** Warm the mode cache at login (async caller). */
+    void loadMode(String wallet) {
+        modeA(wallet);
+    }
+
+    /**
+     * /exportkey step 1: SkyKeys.optIn() from the player's own purse (the player pays the gas). Every later write from
+     * this purse is attested; the cache flips first so nothing in flight goes out bare. Returns the receipt once the
+     * chain confirms the flag.
+     */
+    TransactionReceipt optInExport(Profile profile) throws Exception {
+        String keys = keysContract();
+        if (keys.isBlank()) {
+            throw new IllegalStateException("Key export is not available on this server yet.");
+        }
+        String key = profile.wallet.toLowerCase(Locale.ROOT);
+        exportedCache.put(key, true);
+        exportedAt.put(key, System.currentTimeMillis());
+        TransactionReceipt receipt = null;
+        if (!keyExportedOnchain(profile.wallet)) {
+            receipt = sendTo(profile, keys, new Function("optIn", Collections.emptyList(), Collections.emptyList()), BigInteger.ZERO);
+        }
+        for (int attempt = 0; attempt < 20; attempt++) {
+            if (keyExportedOnchain(profile.wallet)) {
+                return receipt;
+            }
+            Thread.sleep(500L);
+        }
+        throw new IllegalStateException("Somnia has not confirmed the key flag yet. Try /exportkey again in a minute.");
+    }
+
+    /** Wallets whose key must never leave the server (the original deployer purse and server roles). */
+    boolean exportBlocked(String wallet) {
+        if (wallet == null || wallet.isBlank()) {
+            return true;
+        }
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(secretsFile);
+        for (String name : new String[]{"deployer-address", "admin-address", "signer-address"}) {
+            String value = yaml.getString(name, "");
+            if (value != null && value.trim().equalsIgnoreCase(wallet.trim())) {
+                return true;
+            }
+        }
+        for (String value : plugin.getConfig().getStringList("chain.no-export")) {
+            if (value != null && value.trim().equalsIgnoreCase(wallet.trim())) {
+                return true;
+            }
+        }
+        return attestor != null && attestor.address().equalsIgnoreCase(wallet.trim());
+    }
+
+    Attestor attestor() {
+        return attestor;
+    }
+
+    private String sendData(Profile profile, String to, String plainData, long gasLimit) throws Exception {
         if (!canSign(profile)) {
             throw new IllegalStateException("This player is not logged in.");
         }
         Credentials credentials = credentials(profile);
+        String data = attest(credentials.getAddress(), to, plainData, BigInteger.ZERO);
         BigInteger limit = estimateLimit(credentials.getAddress(), to, data, gasLimit);
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;
@@ -672,16 +869,6 @@ final class WalletService {
             return "No purse";
         }
         return address.substring(0, 6) + "..." + address.substring(address.length() - 4);
-    }
-
-    private void saveClaimed() {
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(secretsFile);
-        yaml.set("deployer-claimed", true);
-        try {
-            yaml.save(secretsFile);
-        } catch (IOException exception) {
-            plugin.getLogger().warning("Could not mark the deployer purse as claimed: " + exception.getMessage());
-        }
     }
 
     private HoldItems.View readSlots(String from, Function function, int size) throws IOException {
@@ -871,9 +1058,9 @@ final class WalletService {
         if (to == null || to.isBlank()) {
             throw new IllegalStateException("That contract is not configured.");
         }
-        String data = FunctionEncoder.encode(function);
         Credentials credentials = credentials(profile);
         String from = credentials.getAddress();
+        String data = attest(from, to, FunctionEncoder.encode(function), value);
         String fromKey = from.toLowerCase(Locale.ROOT);
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;

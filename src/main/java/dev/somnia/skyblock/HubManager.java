@@ -1114,6 +1114,7 @@ final class HubManager implements Listener {
                 stray.remove();
             }
         }
+        Npcs.removeLeftovers(world.getEntitiesByClass(org.bukkit.entity.ArmorStand.class), ours);
         npcByEntity.keySet().removeIf(id -> !ours.contains(id));
         for (Npc npc : npcs) {
             if (alive("npc:" + npc.id())) {
@@ -1124,9 +1125,11 @@ final class HubManager implements Listener {
                 continue;
             }
             // Old label of a body that died: remove it before making a new pair.
-            UUID oldLabel = spawned.remove("npclabel:" + npc.id());
-            if (oldLabel != null && world.getEntity(oldLabel) != null) {
-                world.getEntity(oldLabel).remove();
+            for (String part : new String[]{"npclabel:", "npcname:"}) {
+                UUID oldLabel = spawned.remove(part + npc.id());
+                if (oldLabel != null && world.getEntity(oldLabel) != null) {
+                    world.getEntity(oldLabel).remove();
+                }
             }
             if (!standable(at) && reportedSpots.add(npc.id())) {
                 Block feet = at.getBlock();
@@ -1144,6 +1147,7 @@ final class HubManager implements Listener {
                     "placeholder".equals(npc.kind()));
             spawned.put("npc:" + npc.id(), made.body());
             spawned.put("npclabel:" + npc.id(), made.label());
+            spawned.put("npcname:" + npc.id(), made.nameLine());
             npcByEntity.put(made.body(), npc);
         }
         if (zones != null) {

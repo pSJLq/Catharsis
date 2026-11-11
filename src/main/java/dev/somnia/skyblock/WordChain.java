@@ -567,11 +567,13 @@ final class WordChain implements Listener {
         if (seat == null) {
             return;
         }
+        // A layout write still waiting for its 2-tick batch must not be lost when the player leaves right after a move.
+        boolean pending = seat.task >= 0 || seat.again;
         if (seat.task >= 0) {
             plugin.getServer().getScheduler().cancelTask(seat.task);
             seat.task = -1;
         }
-        if (!seat.bagBusy && (seat.trusted != null || seat.trustLocal || !seat.breaks.isEmpty() || !seat.places.isEmpty() || !seat.drops.isEmpty())) {
+        if (!seat.bagBusy && (pending || seat.trusted != null || seat.trustLocal || !seat.breaks.isEmpty() || !seat.places.isEmpty() || !seat.drops.isEmpty())) {
             flush(player);
         }
     }
@@ -627,7 +629,7 @@ final class WordChain implements Listener {
         if (!(event.getPlayer() instanceof Player player) || event.getView().getTopInventory().getHolder() instanceof Menu) {
             return;
         }
-        if (event.getInventory() instanceof CraftingInventory crafting && crafting.getLocation() != null) {
+        if (workbench(event.getInventory())) {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 if (player.isOnline()) {
                     noteLocal(player);
@@ -643,6 +645,15 @@ final class WordChain implements Listener {
         noteLocal(event.getPlayer());
     }
 
+    /**
+     * A crafting table grid (not the player's own 2x2 grid). Paper returns the player's location for the 2x2 grid's
+     * getLocation(), so the old "getLocation() != null" test matched the player's own inventory too and every
+     * slot-only move (click, drag, shift, number keys, offhand swap) was never written to SkyWord.
+     */
+    private static boolean workbench(Inventory inventory) {
+        return inventory instanceof CraftingInventory && inventory.getType() == InventoryType.WORKBENCH;
+    }
+
     private void noteLocal(Player player) {
         if (plugin.hold().offchain(player) || painting.contains(player.getUniqueId())) {
             return;
@@ -651,7 +662,7 @@ final class WordChain implements Listener {
         if (seat == null || !seat.loaded) {
             return;
         }
-        if (player.getOpenInventory().getTopInventory() instanceof CraftingInventory crafting && crafting.getLocation() != null) {
+        if (workbench(player.getOpenInventory().getTopInventory())) {
             return;
         }
         if (seat.bagBusy) {
@@ -1271,7 +1282,14 @@ final class WordChain implements Listener {
             seat.trustFails = 0;
             seat.again = false;
         }
-        paint(player, seat.words);
+        BigInteger[] sane = sanitize(player, seat.words);
+        boolean dropped = !Arrays.equals(sane, seat.words);
+        paint(player, sane);
+        if (dropped && !pendingWorld && !seat.bagBusy) {
+            // Sign the cleaned layout so the chain matches what the server accepts.
+            seat.trustLocal = true;
+            schedule(player);
+        }
         if (!seat.words[STAR].equals(ZERO)) {
             boolean moved = seat.hidden8.equals(ZERO);
             plugin.getLogger().info("SkyWord slot 8 (menu star) held item data for " + player.getName()
@@ -1490,6 +1508,170 @@ final class WordChain implements Listener {
             }
         }
         return -1;
+    }
+
+    /**
+     * Load-time sanity check (never trust the chain blindly): a word must be a known item with a sane count,
+     * or a Voidstep Blade of the configured collection. Anything else is dropped from the view and logged;
+     * the next signed write clears it onchain.
+     */
+    private BigInteger[] sanitize(Player player, BigInteger[] words) {
+        BigInteger[] out = Arrays.copyOf(words, words.length);
+        for (int i = 0; i < out.length; i++) {
+            BigInteger word = out[i];
+            if (word == null || word.signum() == 0) {
+                out[i] = ZERO;
+                continue;
+            }
+            boolean ok;
+            if (isFungible(word)) {
+                int item = itemId(word);
+                int n = count(word);
+                ok = n > 0 && n <= maxStack(item) && HoldItems.stack(plugin, item, 1, 0) != null
+                        && word.shiftRight(48).and(MASK16).signum() == 0 && word.shiftRight(224).signum() == 0;
+            } else {
+                ok = isAotv(word);
+            }
+            if (!ok) {
+                plugin.getLogger().warning("Chain sanity: dropped slot " + i + " word 0x" + word.toString(16) + " for "
+                        + player.getName() + " (not an item the server accepts).");
+                out[i] = ZERO;
+            }
+        }
+        return out;
+    }
+
+    /** /withdraw blade <address>: the Voidstep Blade in hand leaves the game for the player's main wallet (server-attested). */
+    boolean withdrawBlade(Player player, String to) {
+        Seat seat = seats.get(player.getUniqueId());
+        if (plugin.hold().offchain(player) || seat == null || !seat.loaded) {
+            tell(player, "The chain inventory is still loading.", NamedTextColor.RED);
+            return false;
+        }
+        if (busy(player)) {
+            tell(player, "A signature is already in flight. Try again in a moment.", NamedTextColor.YELLOW);
+            return false;
+        }
+        int slot = player.getInventory().getHeldItemSlot();
+        Long serial = swordSerial(player.getInventory().getItem(slot));
+        if (serial == null || slot == STAR || !isAotv(seat.words[slot]) || serial(seat.words[slot]) != serial) {
+            tell(player, "Hold the Voidstep Blade you want to withdraw.", NamedTextColor.RED);
+            return false;
+        }
+        seat.bagBusy = true;
+        tell(player, "Signing the withdraw of Voidstep Blade #" + serial + " to " + WalletService.shortAddress(to) + ".", NamedTextColor.GRAY);
+        UUID id = player.getUniqueId();
+        Profile profile = plugin.profiles().get(id);
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            Exception failure = null;
+            TransactionReceipt receipt = null;
+            try {
+                receipt = plugin.wallets().withdrawNft(profile, slot, to);
+            } catch (Exception exception) {
+                failure = exception;
+            }
+            Exception error = failure;
+            String hash = receipt == null ? null : receipt.getTransactionHash();
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                Seat now = seats.get(id);
+                if (now == null) {
+                    return;
+                }
+                now.bagBusy = false;
+                Player online = plugin.getServer().getPlayer(id);
+                if (error != null) {
+                    if (online != null) {
+                        tell(online, noGas(error) ? "Not enough STT for gas, use /deposit." : "Withdraw failed: " + blame(error), NamedTextColor.RED);
+                    }
+                    return;
+                }
+                now.words[slot] = ZERO;
+                if (online != null) {
+                    ItemStack held = online.getInventory().getItem(slot);
+                    Long still = swordSerial(held);
+                    if (still != null && still.longValue() == serial.longValue()) {
+                        online.getInventory().setItem(slot, null);
+                    } else {
+                        paint(online, now.words);
+                    }
+                    online.sendMessage(plugin.realm().txLine("Voidstep Blade #" + serial + " is now on " + WalletService.shortAddress(to) + ". /deposit-nft " + serial + " brings it back.", hash));
+                }
+                if (online != null && (now.again || now.trustLocal || !now.breaks.isEmpty() || now.trusted != null)) {
+                    schedule(online);
+                }
+            });
+        });
+        return true;
+    }
+
+    /** /deposit-nft <serial>: a Voidstep Blade the game wallet owns again goes into a free slot (server-checked, attested). */
+    boolean depositBlade(Player player, long serial) {
+        Seat seat = seats.get(player.getUniqueId());
+        if (plugin.hold().offchain(player) || seat == null || !seat.loaded) {
+            tell(player, "The chain inventory is still loading.", NamedTextColor.RED);
+            return false;
+        }
+        if (busy(player)) {
+            tell(player, "A signature is already in flight. Try again in a moment.", NamedTextColor.YELLOW);
+            return false;
+        }
+        BigInteger[] base = base(seat);
+        int slot = emptySlot(seat.words, base);
+        if (slot < 0 || player.getInventory().getItem(slot) != null) {
+            tell(player, "Free an inventory slot first.", NamedTextColor.RED);
+            return false;
+        }
+        seat.bagBusy = true;
+        UUID id = player.getUniqueId();
+        Profile profile = plugin.profiles().get(id);
+        tell(player, "Checking Voidstep Blade #" + serial + " on Somnia.", NamedTextColor.GRAY);
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            String problem = null;
+            TransactionReceipt receipt = null;
+            Exception failure = null;
+            try {
+                String owner = plugin.wallets().aotvOwner(serial);
+                if (owner == null || !owner.equalsIgnoreCase(profile.wallet)) {
+                    problem = "Send the blade to your game wallet " + WalletService.shortAddress(profile.wallet) + " first (/deposit shows it).";
+                } else if (plugin.wallets().aotvLocked(serial)) {
+                    problem = "That blade is already in the game.";
+                } else {
+                    receipt = plugin.wallets().depositNft(profile, slot, serial);
+                }
+            } catch (Exception exception) {
+                failure = exception;
+            }
+            String why = problem;
+            Exception error = failure;
+            String hash = receipt == null ? null : receipt.getTransactionHash();
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                Seat now = seats.get(id);
+                if (now == null) {
+                    return;
+                }
+                now.bagBusy = false;
+                Player online = plugin.getServer().getPlayer(id);
+                if (why != null || error != null) {
+                    if (online != null) {
+                        tell(online, why != null ? why : noGas(error) ? "Not enough STT for gas, use /deposit." : "Deposit failed: " + blame(error), NamedTextColor.RED);
+                    }
+                    return;
+                }
+                now.words[slot] = aotvWord(serial);
+                if (online != null) {
+                    if (online.getInventory().getItem(slot) == null) {
+                        online.getInventory().setItem(slot, aspect(serial));
+                    } else {
+                        paint(online, now.words);
+                    }
+                    online.sendMessage(plugin.realm().txLine("Voidstep Blade #" + serial + " is back in your inventory.", hash));
+                }
+                if (online != null && (now.again || now.trustLocal || !now.breaks.isEmpty() || now.trusted != null)) {
+                    schedule(online);
+                }
+            });
+        });
+        return true;
     }
 
     /**
