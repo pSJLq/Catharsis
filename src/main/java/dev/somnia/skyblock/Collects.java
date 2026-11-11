@@ -45,7 +45,9 @@ final class Collects {
             new Entry("emerald", "Emerald", Material.EMERALD, Category.MINING, "Bazaar listing unlocked"),
             new Entry("spruce_log", "Spruce Log", Material.SPRUCE_LOG, Category.FORAGING, "Bazaar listing unlocked"),
             new Entry("jungle_log", "Jungle Log", Material.JUNGLE_LOG, Category.FORAGING, "Bazaar listing unlocked"),
-            new Entry("pale_oak_log", "Pale Oak Log", Material.PALE_OAK_LOG, Category.FORAGING, "Bazaar listing unlocked")
+            new Entry("pale_oak_log", "Pale Oak Log", Material.PALE_OAK_LOG, Category.FORAGING, "Bazaar listing unlocked"),
+            // Appended last: chain collection slots are indexed by position.
+            new Entry("flowers", "Flowers", Material.POPPY, Category.FORAGING, "Flower trades and dyes")
     );
 
     private Collects() {
@@ -68,6 +70,9 @@ final class Collects {
             case STONE, COBBLESTONE, MOSSY_COBBLESTONE, DEEPSLATE, COBBLED_DEEPSLATE, ANDESITE, DIORITE, GRANITE, TUFF,
                  CALCITE, DRIPSTONE_BLOCK, BASALT, SMOOTH_BASALT, BLACKSTONE -> Material.COBBLESTONE;
             default -> {
+                if (HubManager.isFlower(type)) {
+                    yield Material.POPPY;
+                }
                 String n = type.name();
                 Material log = n.endsWith("_WOOD") && !n.startsWith("STRIPPED_") ? Material.matchMaterial(n.substring(0, n.length() - 5) + "_LOG") : null;
                 yield log != null ? log : type;

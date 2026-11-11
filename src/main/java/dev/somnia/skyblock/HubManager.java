@@ -593,7 +593,21 @@ final class HubManager implements Listener {
         if (player != null && player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
             skill(player, type);
         }
-        startRegen(block, data != null ? data : grown(spot).getAsString(), type);
+        String original = data != null ? data : grown(spot).getAsString();
+        if (isFlora(type)) {
+            // Tall grass, large fern, tall flowers: the regen chain sits on the lower half and regrows both halves.
+            try {
+                org.bukkit.block.data.BlockData d = org.bukkit.Bukkit.createBlockData(original);
+                if (d instanceof org.bukkit.block.data.Bisected half && half.getHalf() == org.bukkit.block.data.Bisected.Half.TOP) {
+                    half.setHalf(org.bukkit.block.data.Bisected.Half.BOTTOM);
+                    block = block.getRelative(BlockFace.DOWN);
+                    original = half.getAsString();
+                }
+            } catch (IllegalArgumentException ignored) {
+                // keep as is
+            }
+        }
+        startRegen(block, original, type);
     }
 
     void cleared(Location location) {
@@ -1536,7 +1550,7 @@ final class HubManager implements Listener {
             return;
         }
         Material type = data.getMaterial();
-        boolean resource = CROPS.contains(type) || isNaturalLog(type) || isLeaves(type) || isStone(type)
+        boolean resource = CROPS.contains(type) || isNaturalLog(type) || isLeaves(type) || isStone(type) || isFlora(type)
                 || type.name().endsWith("_ORE") || type == Material.ANCIENT_DEBRIS;
         if (!resource) {
             return;
@@ -1569,6 +1583,12 @@ final class HubManager implements Listener {
         } else if (isLeaves(type)) {
             plugin.skills().add(player, Skills.Skill.FORAGING, 1);
             return;
+        } else if (grassXp(type) > 0) {
+            // Grass and ferns: Foraging XP only, no item and no collection.
+            plugin.skills().add(player, Skills.Skill.FORAGING, grassXp(type));
+            return;
+        } else if (isFlower(type)) {
+            plugin.skills().add(player, Skills.Skill.FORAGING, 1);
         } else if (isStone(type)) {
             plugin.skills().add(player, Skills.Skill.MINING, type.name().contains("DEEPSLATE") ? 2 : 1);
         } else {
@@ -1700,7 +1720,7 @@ final class HubManager implements Listener {
                 } else if (block.getRelative(BlockFace.UP).getType() == type) {
                     why = "Harvest it from the top.";
                 }
-            } else if (!isLeaves(type) && block.getDrops(player.getInventory().getItemInMainHand(), player).isEmpty()) {
+            } else if (!isLeaves(type) && !isFlora(type) && block.getDrops(player.getInventory().getItemInMainHand(), player).isEmpty()) {
                 why = hint(type);
             }
             if (why != null) {
@@ -1742,6 +1762,67 @@ final class HubManager implements Listener {
 
     static boolean isLeaves(Material t) {
         return t.name().endsWith("_LEAVES");
+    }
+
+    /** Natural flowers (small and tall): the flower goes to the bag, +1 Foraging XP and the Flowers collection. */
+    static boolean isFlower(Material t) {
+        return org.bukkit.Tag.SMALL_FLOWERS.isTagged(t) || t == Material.SUNFLOWER || t == Material.LILAC
+                || t == Material.PEONY || t == Material.ROSE_BUSH;
+    }
+
+    /** Foraging XP for grass and ferns (no item): 1 for short grass / fern, 2 for tall grass / large fern, else 0. */
+    static int grassXp(Material t) {
+        return switch (t) {
+            case SHORT_GRASS, FERN -> 1;
+            case TALL_GRASS, LARGE_FERN -> 2;
+            default -> 0;
+        };
+    }
+
+    static boolean isFlora(Material t) {
+        return isFlower(t) || grassXp(t) > 0;
+    }
+
+    private static final long FLORA_TICKS = 400L;
+
+    /** Island flowers and grass regrow server-side (no tx) when the spot is still free soil with air above. */
+    void islandRegrow(Location location, String data) {
+        if (location == null || data == null) {
+            return;
+        }
+        org.bukkit.block.data.BlockData d;
+        try {
+            d = org.bukkit.Bukkit.createBlockData(data);
+        } catch (IllegalArgumentException exception) {
+            return;
+        }
+        if (!isFlora(d.getMaterial())) {
+            return;
+        }
+        Block at = location.getBlock();
+        if (d instanceof org.bukkit.block.data.Bisected half && half.getHalf() == org.bukkit.block.data.Bisected.Half.TOP) {
+            half.setHalf(org.bukkit.block.data.Bisected.Half.BOTTOM);
+            at = at.getRelative(BlockFace.DOWN);
+        }
+        Block spot = at;
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            boolean tall = d instanceof org.bukkit.block.data.Bisected;
+            if (!spot.getType().isAir() || tall && !spot.getRelative(BlockFace.UP).getType().isAir()
+                    || !org.bukkit.Tag.DIRT.isTagged(spot.getRelative(BlockFace.DOWN).getType())) {
+                return;
+            }
+            place(spot, d);
+        }, FLORA_TICKS);
+    }
+
+    /** Sets a plant, both halves for tall grass / large fern. */
+    private static void place(Block block, org.bukkit.block.data.BlockData data) {
+        block.setBlockData(data, false);
+        if (data instanceof org.bukkit.block.data.Bisected half && half.getHalf() == org.bukkit.block.data.Bisected.Half.BOTTOM) {
+            org.bukkit.block.data.BlockData top = data.clone();
+            ((org.bukkit.block.data.Bisected) top).setHalf(org.bukkit.block.data.Bisected.Half.TOP);
+            block.getRelative(BlockFace.UP).setBlockData(top, false);
+        }
     }
 
     /** Natural stone: mined straight to bedrock, back after STONE_TICKS. */
@@ -1890,7 +1971,7 @@ final class HubManager implements Listener {
         if (spot != null) {
             return t.isAir() ? null : t;
         }
-        if (!(isOreType(t) || CROPS.contains(t) || isNaturalLog(t) || isLeaves(t) || isStone(t))) {
+        if (!(isOreType(t) || CROPS.contains(t) || isNaturalLog(t) || isLeaves(t) || isStone(t) || isFlora(t))) {
             return null;
         }
         if (protectedSpot(b)) {
@@ -1902,7 +1983,7 @@ final class HubManager implements Listener {
         if (isLeaves(t)) {
             return treeLeaves(b) ? t : null;
         }
-        if ((isStone(t) || isOreType(t)) && touchesStructure(b)) {
+        if ((isStone(t) || isOreType(t) || isFlora(t)) && touchesStructure(b)) {
             return null;
         }
         return t;
@@ -1928,6 +2009,11 @@ final class HubManager implements Listener {
         long k = key(block);
         regen.put(k, original);
         regenAt.put(k, block.getLocation());
+        // Stone/ore bedrock and crop sprouts go in this same tick: the client never sees an air gap.
+        org.bukkit.block.data.BlockData hold = stage(original, type);
+        if (hold != null && !block.getBlockData().equals(hold)) {
+            block.setBlockData(hold, false);
+        }
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (!original.equals(regen.get(k))) {
                 return;
@@ -1963,6 +2049,50 @@ final class HubManager implements Listener {
         });
     }
 
+    /** Regen placeholder that replaces a hub resource the moment it is broken; null where air is by design (trees, others). */
+    private org.bukkit.block.data.BlockData stage(String original, Material type) {
+        if (type == null) {
+            return null;
+        }
+        if (isOreType(type) || isStone(type)) {
+            return Material.BEDROCK.createBlockData();
+        }
+        if (isNaturalLog(type) || isLeaves(type) || isFlora(type) || type == Material.SUGAR_CANE || type == Material.CACTUS) {
+            return null;
+        }
+        try {
+            org.bukkit.block.data.BlockData sprout = org.bukkit.Bukkit.createBlockData(original);
+            if (sprout instanceof org.bukkit.block.data.Ageable a) {
+                a.setAge(0);
+                return sprout;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // unknown data: no placeholder
+        }
+        return null;
+    }
+
+    /**
+     * Placeholder for a hub resource that is being broken right now (guard already approved it), or null.
+     * The SkyWord break path sets it in the break tick instead of letting the block turn into air.
+     */
+    org.bukkit.block.data.BlockData placeholder(Block block) {
+        if (!isHub(block.getWorld())) {
+            return null;
+        }
+        long k = key(block);
+        if (regen.containsKey(k)) {
+            return null;
+        }
+        String data = breaking.get(k);
+        Material spot = ores.get(k);
+        Material type = data != null ? Material.matchMaterial(data.replaceAll("\\[.*", "")) : spot;
+        if (type == null) {
+            return null;
+        }
+        return stage(data != null ? data : grown(spot).getAsString(), type);
+    }
+
     private void later(long k, String original, long ticks, Runnable step) {
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
             if (original.equals(regen.get(k))) {
@@ -1978,7 +2108,7 @@ final class HubManager implements Listener {
             return;
         }
         try {
-            at.getBlock().setBlockData(ripe(original), false);
+            place(at.getBlock(), ripe(original));
         } catch (IllegalArgumentException e) {
             plugin.getLogger().warning("Regen could not restore " + original + ": " + e.getMessage());
         }

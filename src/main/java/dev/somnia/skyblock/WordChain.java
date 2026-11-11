@@ -11,6 +11,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Container;
 import org.bukkit.block.data.Ageable;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -67,6 +68,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 final class WordChain implements Listener {
     static final int COBBLE = 1851776868;
     private static final int BAG = HoldItems.BAG;
+    /** Hotbar slot 9 (index 8): the SkyBlock Menu star. Reserved, never item data on chain. */
+    static final int STAR = SbMenu.STAR_SLOT;
     private static final int MAX_MANA = 100;
     private static final int MANA_COST = 45;
     private static final BigInteger ZERO = BigInteger.ZERO;
@@ -105,6 +108,15 @@ final class WordChain implements Listener {
 
     void stop() {
         Bukkit.removeRecipe(recipeKey());
+        // A hub break still waiting for its signature holds a bedrock/sprout placeholder: put the resource back
+        // so the hub never keeps a stray placeholder outside the regen timers.
+        for (Seat seat : seats.values()) {
+            for (PendingBreak pending : seat.breaks) {
+                if (pending.placeholder) {
+                    restoreBlock(pending.location, pending.rollback);
+                }
+            }
+        }
     }
 
     void login(Player player, boolean fromCreative) {
@@ -140,19 +152,20 @@ final class WordChain implements Listener {
             tell(player, "A signature is already in flight.", NamedTextColor.YELLOW);
             return false;
         }
+        BigInteger[] base = base(seat);
         int from = cobbleSlot(seat.words);
         if (from < 0) {
             tell(player, "You need cobblestone in the signed inventory.", NamedTextColor.RED);
             return false;
         }
         int have = count(seat.words[from]);
-        int to = have == 1 ? from : emptySlot(seat.words);
+        int to = have == 1 ? from : emptySlot(seat.words, base);
         if (to < 0) {
             tell(player, "Free a slot for the sword.", NamedTextColor.RED);
             return false;
         }
         seat.bagBusy = true;
-        BigInteger[] preview = copy(seat.words);
+        BigInteger[] preview = base;
         int left = have - 1;
         preview[from] = left <= 0 ? ZERO : stackWord(COBBLE, left);
         paint(player, preview);
@@ -226,6 +239,14 @@ final class WordChain implements Listener {
             return;
         }
         List<ItemStack> drops = new ArrayList<>(block.getDrops(player.getInventory().getItemInMainHand(), player));
+        Block lowerHalf = lowerHalf(block);
+        if (lowerHalf != null) {
+            // Tall flower / tall grass hit on the top half: the item comes from the bottom half (vanilla loot).
+            drops = new ArrayList<>(lowerHalf.getDrops(player.getInventory().getItemInMainHand(), player));
+        }
+        if (HubManager.grassXp(block.getType()) > 0) {
+            drops.clear(); // grass and ferns pay Foraging XP only: no item, so no bag write
+        }
         Map<Integer, Integer> totals = new HashMap<>();
         for (ItemStack drop : drops) {
             if (drop == null || drop.getType().isAir() || drop.getAmount() <= 0) {
@@ -242,10 +263,16 @@ final class WordChain implements Listener {
         if (totals.isEmpty()) {
             event.setDropItems(false);
             event.setExpToDrop(0);
+            clearLowerHalf(lowerHalf);
+            if (!onIsland && plugin.hub().placeholder(block) != null) {
+                // Regen placeholder goes in now (cleared -> startRegen); the vanilla break must not turn it into air.
+                event.setCancelled(true);
+            }
             // Nothing to write to the bag (leaves, blocks without a bag item): the resource still pays XP (hub: and regrows).
             plugin.hub().cleared(block.getLocation(), player);
             if (onIsland && !placed.contains(key(block))) {
                 plugin.hub().islandCleared(player, block.getBlockData().getAsString());
+                plugin.hub().islandRegrow(block.getLocation(), block.getBlockData().getAsString());
             }
             return;
         }
@@ -285,8 +312,18 @@ final class WordChain implements Listener {
             return;
         }
         seat.breaks.add(pending);
+        clearLowerHalf(lowerHalf);
         event.setDropItems(false);
         event.setExpToDrop(0);
+        // Hub stone/ore/crops: never let the client see air. Cancel the vanilla break and put the regen
+        // placeholder (bedrock / sprout) in this same tick; a failed signature still restores the original block.
+        BlockData hold = onIsland ? null : plugin.hub().placeholder(block);
+        if (hold != null) {
+            event.setCancelled(true);
+            block.setBlockData(hold, false);
+            pending.placeholder = true;
+            player.sendBlockChange(block.getLocation(), hold);
+        }
         if (seat.trustLocal) {
             paint(player, trial);
         } else {
@@ -630,7 +667,7 @@ final class WordChain implements Listener {
     }
 
     private void sendWorld(Player player, Seat seat) {
-        BigInteger[] target = copy(seat.words);
+        BigInteger[] target = base(seat);
         List<PendingBreak> breaks = new ArrayList<>();
         List<PendingPlace> places = new ArrayList<>();
         List<PendingDrop> drops = new ArrayList<>();
@@ -906,7 +943,9 @@ final class WordChain implements Listener {
                 tell(player, wiping
                         ? "The purse could not clear the old bag. Rejoin when it can pay the gas."
                         : noGas(error)
-                        ? "Not enough STT for gas, use /deposit. The block was put back."
+                        ? (breaks.isEmpty() && places.isEmpty()
+                        ? "Not enough STT for gas, use /deposit. Your items are safe; the bag layout will be signed on the next change."
+                        : "Not enough STT for gas, use /deposit. The block was put back.")
                         : "Could not sign that inventory change: " + blame(error) + " Your bag is back to the last signed state.", NamedTextColor.RED);
             }
             if (seat.again || seat.trustLocal || seat.trusted != null || !seat.breaks.isEmpty()) {
@@ -947,7 +986,9 @@ final class WordChain implements Listener {
             }
         }
         for (PendingBreak pending : breaks) {
-            pending.location.getBlock().setType(Material.AIR);
+            if (!pending.placeholder) {
+                pending.location.getBlock().setType(Material.AIR);
+            }
             if (pending.forgetPlaced) {
                 placed.remove(pending.key);
             }
@@ -956,6 +997,9 @@ final class WordChain implements Listener {
                 plugin.getServer().getScheduler().runTaskLater(plugin, () -> refill(location), 8L);
             }
             plugin.hub().cleared(pending.location, player);
+            if (pending.islandResource) {
+                plugin.hub().islandRegrow(pending.location, pending.rollback);
+            }
             if (player != null && pending.islandResource) {
                 plugin.hub().islandCleared(player, pending.rollback);
             }
@@ -1183,6 +1227,14 @@ final class WordChain implements Listener {
             seat.again = false;
         }
         paint(player, seat.words);
+        if (!seat.words[STAR].equals(ZERO)) {
+            boolean moved = seat.hidden8.equals(ZERO);
+            plugin.getLogger().info("SkyWord slot 8 (menu star) held item data for " + player.getName()
+                    + (moved ? "; moved it to a free slot, signing the corrected layout." : "; bag full, kept on chain until a slot frees up."));
+            if (moved && !pendingWorld && !seat.bagBusy) {
+                schedule(player);
+            }
+        }
         if (pendingWorld) {
             show(player, seat);
             if (!seat.bagBusy) {
@@ -1310,6 +1362,9 @@ final class WordChain implements Listener {
         int left = amount;
         int max = maxStack(item);
         for (int slot = 0; slot < 36 && left > 0; slot++) {
+            if (slot == STAR) {
+                continue;
+            }
             BigInteger word = target[slot];
             if (!isFungible(word) || itemId(word) != item || count(word) <= 0) {
                 continue;
@@ -1323,7 +1378,7 @@ final class WordChain implements Listener {
             left -= move;
         }
         for (int slot = 0; slot < 36 && left > 0; slot++) {
-            if (!target[slot].equals(ZERO)) {
+            if (slot == STAR || !target[slot].equals(ZERO)) {
                 continue;
             }
             int move = Math.min(max, left);
@@ -1372,6 +1427,9 @@ final class WordChain implements Listener {
 
     private int cobbleSlot(BigInteger[] words) {
         for (int slot = 0; slot < 36; slot++) {
+            if (slot == STAR) {
+                continue;
+            }
             BigInteger word = words[slot];
             if (isFungible(word) && itemId(word) == COBBLE && count(word) >= 1) {
                 return slot;
@@ -1380,13 +1438,55 @@ final class WordChain implements Listener {
         return -1;
     }
 
-    private int emptySlot(BigInteger[] words) {
+    private int emptySlot(BigInteger[] words, BigInteger[] shown) {
         for (int slot = 0; slot < 36; slot++) {
-            if (words[slot].equals(ZERO)) {
+            if (slot != STAR && words[slot].equals(ZERO) && shown[slot].equals(ZERO)) {
                 return slot;
             }
         }
         return -1;
+    }
+
+    /**
+     * Slot 8 is the SkyBlock Menu star and is never an item slot. If chain data still maps an item to slot 8
+     * (older layouts), show it in the first free slot (or on a matching stack) instead; the next write signs that move.
+     * If the bag is truly full the word stays at 8 (kept on chain, hidden behind the star) until there is room.
+     */
+    static BigInteger[] reserve(BigInteger[] words, java.util.function.IntUnaryOperator maxStack) {
+        BigInteger[] out = Arrays.copyOf(words, words.length);
+        BigInteger word = out[STAR];
+        if (word == null || word.signum() == 0) {
+            return out;
+        }
+        if (isFungible(word)) {
+            int item = itemId(word);
+            int max = maxStack.applyAsInt(item);
+            for (int slot = 0; slot < 36; slot++) {
+                BigInteger other = out[slot];
+                if (slot != STAR && isFungible(other) && itemId(other) == item && count(other) > 0
+                        && count(other) + count(word) <= max) {
+                    out[slot] = stackWord(item, count(other) + count(word));
+                    out[STAR] = ZERO;
+                    return out;
+                }
+            }
+        }
+        for (int slot = 0; slot < 36; slot++) {
+            if (slot != STAR && out[slot].signum() == 0) {
+                out[slot] = word;
+                out[STAR] = ZERO;
+                return out;
+            }
+        }
+        return out;
+    }
+
+    private ItemStack starOrNull(ItemStack stack) {
+        return SbMenu.isStar(plugin, stack) ? stack : null;
+    }
+
+    private BigInteger[] base(Seat seat) {
+        return reserve(seat.words, this::maxStack);
     }
 
     private BigInteger[] liveWords(Player player) {
@@ -1401,15 +1501,24 @@ final class WordChain implements Listener {
             words[36 + i] = pack(armor[i]);
         }
         words[40] = pack(player.getInventory().getItemInOffHand());
+        // The star slot never carries item data; only a word that could not be moved out yet (full bag) stays there.
+        Seat seat = seats.get(player.getUniqueId());
+        words[STAR] = seat == null ? ZERO : seat.hidden8;
         return words;
     }
 
     private void paint(Player player, BigInteger[] words) {
         painting.add(player.getUniqueId());
+        words = reserve(words, this::maxStack);
+        Seat owner = seats.get(player.getUniqueId());
+        if (owner != null) {
+            owner.hidden8 = words[STAR] == null ? ZERO : words[STAR];
+        }
         ItemStack[] storage = new ItemStack[36];
         ItemStack[] armor = new ItemStack[4];
         for (int i = 0; i < 36; i++) {
-            storage[i] = unpack(words[i]);
+            // Never place chain items into the star slot: it belongs to the SkyBlock Menu star.
+            storage[i] = i == STAR ? starOrNull(player.getInventory().getItem(STAR)) : unpack(words[i]);
         }
         for (int i = 0; i < 4; i++) {
             armor[i] = unpack(words[36 + i]);
@@ -1539,7 +1648,7 @@ final class WordChain implements Listener {
     }
 
     private BigInteger[] shown(Seat seat) {
-        BigInteger[] target = copy(seat.words);
+        BigInteger[] target = base(seat);
         for (PendingBreak pending : seat.breaks) {
             applyBreak(target, pending);
         }
@@ -1552,12 +1661,42 @@ final class WordChain implements Listener {
         return target;
     }
 
+    /** Bottom half of a tall plant whose top half is being broken, or null. */
+    private static Block lowerHalf(Block block) {
+        if (!HubManager.isFlora(block.getType()) || !(block.getBlockData() instanceof org.bukkit.block.data.Bisected half)
+                || half.getHalf() != org.bukkit.block.data.Bisected.Half.TOP) {
+            return null;
+        }
+        Block lower = block.getRelative(BlockFace.DOWN);
+        return lower.getType() == block.getType() ? lower : null;
+    }
+
+    /** Removes the bottom half quietly so vanilla never drops its loot as a world item (the bag write carries it). */
+    private static void clearLowerHalf(Block lower) {
+        if (lower != null) {
+            lower.setType(Material.AIR, false);
+        }
+    }
+
     private void restoreBlock(Location location, String data) {
         if (location == null || data == null || data.isBlank()) {
             return;
         }
         try {
-            location.getBlock().setBlockData(Bukkit.createBlockData(data));
+            BlockData restored = Bukkit.createBlockData(data);
+            if (HubManager.isFlora(restored.getMaterial()) && restored instanceof org.bukkit.block.data.Bisected half) {
+                // Tall grass / tall flowers: the vanilla break took both halves, put both back without physics.
+                org.bukkit.block.data.Bisected other = (org.bukkit.block.data.Bisected) restored.clone();
+                boolean top = half.getHalf() == org.bukkit.block.data.Bisected.Half.TOP;
+                other.setHalf(top ? org.bukkit.block.data.Bisected.Half.BOTTOM : org.bukkit.block.data.Bisected.Half.TOP);
+                Block pair = location.getBlock().getRelative(top ? BlockFace.DOWN : BlockFace.UP);
+                if (pair.getType().isAir()) {
+                    pair.setBlockData(other, false);
+                }
+                location.getBlock().setBlockData(restored, false);
+                return;
+            }
+            location.getBlock().setBlockData(restored);
         } catch (IllegalArgumentException exception) {
             plugin.getLogger().warning("Could not restore block data " + data);
         }
@@ -1889,6 +2028,7 @@ final class WordChain implements Listener {
 
     private static final class Seat {
         final BigInteger[] words = new BigInteger[BAG];
+        BigInteger hidden8 = ZERO;
         BigInteger combat = ZERO;
         boolean loaded;
         boolean bagBusy;
@@ -1924,6 +2064,7 @@ final class WordChain implements Listener {
         final long key;
         final boolean forgetPlaced;
         final String rollback;
+        boolean placeholder;
 
         PendingBreak(Location location, int[] items, int[] counts, boolean islandResource, boolean refill, long key, boolean forgetPlaced, String rollback) {
             this.location = location;

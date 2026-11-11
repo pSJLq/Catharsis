@@ -25,12 +25,14 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -105,7 +107,11 @@ final class SbMenu implements Listener, CommandExecutor {
         return stack;
     }
 
-    /** Puts the star into the last hotbar slot when that slot is free. Removes duplicates elsewhere. */
+    /**
+     * Slot 9 (index 8) always belongs to the star: puts it there, moves any other item out of that slot into a
+     * free slot (or drops it at the player's feet if the bag is full) and removes duplicates elsewhere.
+     * With the star turned off in settings the slot stays empty but still reserved.
+     */
     void give(Player player) {
         if (player == null || !player.isOnline() || player.getGameMode() == org.bukkit.GameMode.CREATIVE
                 || player.getGameMode() == org.bukkit.GameMode.SPECTATOR) {
@@ -120,6 +126,14 @@ final class SbMenu implements Listener, CommandExecutor {
         }
         if (isStar(plugin, player.getInventory().getItemInOffHand())) {
             player.getInventory().setItemInOffHand(null);
+        }
+        ItemStack intruder = player.getInventory().getItem(STAR_SLOT);
+        if (intruder != null && !intruder.getType().isAir() && !isStar(plugin, intruder)) {
+            // Hold the slot with the star while the intruder is re-added, so it can only land elsewhere.
+            player.getInventory().setItem(STAR_SLOT, star());
+            for (ItemStack left : player.getInventory().addItem(intruder).values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            }
         }
         if (profile.menuItemOff) {
             if (isStar(plugin, player.getInventory().getItem(STAR_SLOT))) {
@@ -138,6 +152,33 @@ final class SbMenu implements Listener, CommandExecutor {
         Player player = event.getPlayer();
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> give(player), 60L);
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> give(player), 200L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorld(PlayerChangedWorldEvent event) {
+        Player player = event.getPlayer();
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> give(player), 2L);
+    }
+
+    /** Pickups never fill slot 9: when it is empty (star turned off) the star holds it for this tick. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onPickup(org.bukkit.event.player.PlayerAttemptPickupItemEvent event) {
+        holdSlot(event.getPlayer());
+    }
+
+    private void holdSlot(Player player) {
+        if (player.getGameMode() == org.bukkit.GameMode.CREATIVE || player.getGameMode() == org.bukkit.GameMode.SPECTATOR) {
+            return;
+        }
+        ItemStack current = player.getInventory().getItem(STAR_SLOT);
+        if (current == null || current.getType().isAir()) {
+            player.getInventory().setItem(STAR_SLOT, star());
+            plugin.getServer().getScheduler().runTask(plugin, () -> give(player));
+        }
+    }
+
+    private static boolean starSlot(Player player, Inventory clicked, int slot) {
+        return clicked instanceof PlayerInventory && clicked.equals(player.getInventory()) && slot == STAR_SLOT;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -172,7 +213,8 @@ final class SbMenu implements Listener, CommandExecutor {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onSwap(PlayerSwapHandItemsEvent event) {
-        if (isStar(plugin, event.getMainHandItem()) || isStar(plugin, event.getOffHandItem())) {
+        if (isStar(plugin, event.getMainHandItem()) || isStar(plugin, event.getOffHandItem())
+                || event.getPlayer().getInventory().getHeldItemSlot() == STAR_SLOT) {
             event.setCancelled(true);
         }
     }
@@ -185,6 +227,15 @@ final class SbMenu implements Listener, CommandExecutor {
         }
         if (isStar(plugin, event.getOldCursor())) {
             event.setCancelled(true);
+            return;
+        }
+        if (event.getWhoClicked() instanceof Player player) {
+            for (int raw : event.getRawSlots()) {
+                if (starSlot(player, event.getView().getInventory(raw), event.getView().convertSlot(raw))) {
+                    event.setCancelled(true);
+                    return;
+                }
+            }
         }
     }
 
@@ -210,10 +261,24 @@ final class SbMenu implements Listener, CommandExecutor {
             }
             return;
         }
-        if (starClick || event.getAction() == InventoryAction.HOTBAR_SWAP && event.getHotbarButton() == STAR_SLOT
-                && isStar(plugin, player.getInventory().getItem(STAR_SLOT))) {
+        if (starClick) {
             event.setCancelled(true);
             plugin.getServer().getScheduler().runTask(plugin, () -> openMain(player));
+            return;
+        }
+        if (player.getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        boolean intoSlot = starSlot(player, event.getClickedInventory(), event.getSlot())
+                || (event.getClick() == ClickType.NUMBER_KEY && event.getHotbarButton() == STAR_SLOT);
+        if (intoSlot) {
+            // Slot 9 is the star's: nothing moves in or out of it (click, number key 9, offhand swap, shift-click).
+            event.setCancelled(true);
+            return;
+        }
+        if (event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
+            // A shift-click must not land in an empty slot 9 (star turned off): hold it for this click.
+            holdSlot(player);
         }
     }
 
@@ -659,7 +724,7 @@ final class SbMenu implements Listener, CommandExecutor {
         view.set(4, icon(Material.PAINTING, plain("Collections", NamedTextColor.GREEN), List.of(
                 plain("Collections Unlocked: ", NamedTextColor.GRAY).append(plain(percent(unlocked, Collects.ENTRIES.size()), NamedTextColor.YELLOW)),
                 bar(unlocked, Collects.ENTRIES.size()))), null);
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43, 46, 47, 50, 51, 52};
         int i = 0;
         int[] tiers = ProgressMath.tiers();
         for (Collects.Entry entry : Collects.ENTRIES) {
