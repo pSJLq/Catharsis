@@ -15,7 +15,7 @@ chain:
   aotv-contract: "0x378D4201ce775263f101EB5eC4A63d2E5d669c24"
   realm-contract: "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d"
   bin-contract: "0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638"
-  # skills-contract: set to the live SkySkills2 address after deploy
+  skills-contract: "0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf"
   skills-contract-v1: "0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a"
   gas-limit: 8000000
   max-fee-gwei: 20         # cap; the fee itself follows eth_gasPrice (+ a safety margin)

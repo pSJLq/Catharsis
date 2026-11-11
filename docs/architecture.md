@@ -1,13 +1,16 @@
 # Architecture
 
 ```
-Java client  →  Paper 26.3  →  SomniaSkyblock plugin
-                                  ├─ world, hub, islands, menus, combat
-                                  ├─ KeyVault (Argon2id + AES-256-GCM)
-                                  └─ chain client (web3j)
-                                         ├─ SkyWord, SkySkills2, SkyIsland, …
-                                         └─ public RPCs with failover
+Browser (play site)  ----+
+                         +-->  Paper 26.3  -->  SomniaSkyblock plugin
+Desktop Java client  ----+                       |-- world, hub, islands, menus, combat
+                                                 |-- KeyVault (Argon2id + AES-256-GCM)
+                                                 +-- chain client (web3j)
+                                                        |-- SkyWord, SkySkills2, SkyIsland, ...
+                                                        +-- public RPCs with failover
 ```
+
+Playing in the browser is the main way to join. The play site serves the browser client and connects it to the same Paper server a desktop Java client would use. The client binary is distributed by the play site and is not stored in this repository.
 
 ## Plugin
 
@@ -37,6 +40,6 @@ A broken block on the island and a broken block in the hub go through the same c
 
 ## Website and explorer
 
-`website/` is the marketing site. It can sit on the same machine as the game server. The in-browser client that some older pages still mention is **not** published here and is not part of the public test.
+`website/` is the site source: marketing pages and the play page. It can sit on the same machine as the game server. The browser client is served by that site at runtime and is not checked into this repository.
 
 `explorer/` is a small node service that reads Shannon and lists game-contract activity. Item icons are intentionally omitted from this tree (see `explorer/README.md`).

@@ -1,13 +1,12 @@
 # Website
 
-Source for the Catharsis marketing site (`website/server.js`).
+Source for the Catharsis site: marketing pages and the **play** page.
+
+Playing in the browser is the main way to join the game. The play site serves the browser client and connects it to the Paper server. The client binary is distributed by the play site and is not stored in this repository.
 
 Static pages, styles, fonts, and images are under `public/`. Layout partials are in `partials/`.
 
-## Not in this repository
-
-- An in-browser game client. Several pages still describe an older “play in the browser on one shared island” prototype. The public v1 test is a **Java Edition server** with private islands and a hub. That copy needs a rewrite before the site is pointed at a public URL.
-- `data/auth.json` — the admin password hash for the tiny news editor. Use `data/auth.json.example` as a template and keep the real file out of git.
+`data/auth.json` (the admin password hash for the tiny news editor) is not in this repository. Use `data/auth.json.example` as a template and keep the real file out of git.
 
 ## Run locally
 

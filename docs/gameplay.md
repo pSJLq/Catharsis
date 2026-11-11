@@ -4,7 +4,7 @@ Catharsis is a SkyBlock-style grind MMO. You start on your own island, visit a s
 
 ## First steps
 
-1. Connect with a Java Edition 26.3-compatible client to the public server address (published at launch).
+1. Open the **play site in your browser**. That is the main way to play. The site serves the browser client and connects it to the game server. (The client itself is distributed by the play site, not from this repository.) You can also connect with a desktop Java client (26.3) to the public server address, published at launch.
 2. `/register <password> <password>` creates your account and a game wallet. The password seals that wallet. Choose a password you will not reuse elsewhere.
 3. `/login <password>` unlocks the wallet for the session.
 4. `/deposit` shows your wallet address (click to copy), a faucet link, and your STT balance. Fund the wallet from the [Shannon faucet](https://explorer.testnet.somnia.network/faucet) or another wallet you control.

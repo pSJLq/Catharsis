@@ -1,6 +1,6 @@
 # Catharsis
 
-An onchain SkyBlock-style grind MMO on the [Somnia](https://somnia.network) Shannon testnet.
+An onchain SkyBlock-style grind MMO on the [Somnia](https://somnia.network) Shannon testnet. **Play in the browser** — that is the main way to join — or connect with a desktop Java client. Both talk to the same Paper server.
 
 You mine, forage, farm, fight, trade, and quest. Inventory, skill XP, and collections are written to smart contracts. **Each player pays their own gas** from a personal game wallet. The chain is the source of truth: if a transaction fails or the wallet has no STT, the world action rolls back.
 
@@ -14,7 +14,7 @@ Status: **public test of v1** on Shannon (chain id `50312`). The contracts are n
 | [`contracts/`](contracts) | Solidity contracts, ABIs, and Foundry tests |
 | [`docs/`](docs) | Gameplay, contract addresses, gas, and architecture |
 | [`scripts/deploy/`](scripts/deploy) | Optional deploy helpers (read a key from `.env`, never from the repo) |
-| [`website/`](website) | Marketing site source. The in-browser client is **not** in this repository |
+| [`website/`](website) | Site source, including the play page. The browser client is distributed by the play site and is not stored in this repository |
 | [`explorer/`](explorer) | Lightweight explorer for game transactions on Shannon |
 
 ## Network
@@ -36,8 +36,8 @@ Deployer (public EOA, not a key): [`0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6`]
 | --- | --- | --- |
 | SkyIsland | [`0xeB97b719A39722D678418a0f87e6f5bEd8016bA0`](https://explorer.testnet.somnia.network/address/0xeB97b719A39722D678418a0f87e6f5bEd8016bA0) | Island deed and membership |
 | SkyWord | [`0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c`](https://explorer.testnet.somnia.network/address/0x699C4FF0a4f1Afa2B7A86ffF7d0ae7D403C5684c) | Inventory (packed bag words) |
-| SkySkills | [`0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a`](https://explorer.testnet.somnia.network/address/0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a) | Skills and collections v1 (add-only) |
-| SkySkills2 | *live; address to be added to this table after it is confirmed from the deploy receipt* | Skills and collections v2 (profile epochs, `resetProfile`) |
+| SkySkills2 | [`0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf`](https://explorer.testnet.somnia.network/address/0x287bEAE39A6E65B3a2b4026258490B0bDb44BcEf) | Skills and collections (current). Profile epochs and `resetProfile`. [Deploy tx](https://explorer.testnet.somnia.network/tx/0x6af8858630f40fe58616d92367d40e90d50ebc08dafb7a88b1cde27ea76e23b1) (2026-11-10) |
+| SkySkills (v1, deprecated) | [`0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a`](https://explorer.testnet.somnia.network/address/0x81f560a101ea5ea5c37e1b89b6bd6e0251aa854a) | Add-only predecessor. Kept for history after the v2 migration. |
 | SkyHold | [`0x26cf755903bA760d90363d5a74C9e877259603F3`](https://explorer.testnet.somnia.network/address/0x26cf755903bA760d90363d5a74C9e877259603F3) | Held items / equipment slots |
 | SkyGear | [`0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8`](https://explorer.testnet.somnia.network/address/0x4f6373aD986d8dCC04D589352abBD707C6A3E1d8) | Unique gear tokens |
 | AOTV | [`0x378D4201ce775263f101EB5eC4A63d2E5d669c24`](https://explorer.testnet.somnia.network/address/0x378D4201ce775263f101EB5eC4A63d2E5d669c24) | Aspect of the Void token |
