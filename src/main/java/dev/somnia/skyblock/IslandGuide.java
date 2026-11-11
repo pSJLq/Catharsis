@@ -28,6 +28,7 @@ final class IslandGuide implements Listener {
     private static final String TAG = "sb-guide";
     private final SomniaSkyblockPlugin plugin;
     private final Map<UUID, UUID[]> spawned = new HashMap<>();
+    private int islandHolosRemoved;
 
     IslandGuide(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
@@ -67,6 +68,7 @@ final class IslandGuide implements Listener {
                 if (entity != null) {
                     entity.remove();
                 }
+                Npcs.forget(id);
             }
             return true;
         });
@@ -87,6 +89,22 @@ final class IslandGuide implements Listener {
         String skin = plugin.getConfig().getString("npc-skins.guide", "default:alex:slim");
         Npcs.Spawned made = Npcs.spawn(world, base, TAG, "Wren the Island Guide", NamedTextColor.YELLOW, skin, plugin.getLogger());
         spawned.put(profile.uuid, new UUID[]{made.body(), made.label(), made.nameLine()});
+    }
+
+    /** Where Wren stands on this player's island (her entity, else her spot), or null. For the objective arrow. */
+    Location wren(World world, Profile profile) {
+        UUID[] ids = spawned.get(profile.uuid);
+        if (ids != null) {
+            Entity v = world.getEntity(ids[0]);
+            if (v != null && v.isValid()) {
+                return v.getLocation();
+            }
+        }
+        if (profile.islandNpc != null) {
+            double[] n = profile.islandNpc;
+            return new Location(world, profile.islandX + Math.floor(n[0]) + 0.5, IslandManager.GROUND_Y + n[1], profile.islandZ + Math.floor(n[2]) + 0.5);
+        }
+        return null;
     }
 
     /** A free standing spot a few blocks from the island spawn, found by scanning down. */
@@ -136,6 +154,19 @@ final class IslandGuide implements Listener {
         int removed = Npcs.removeLeftovers(event.getEntities(), null);
         if (removed > 0) {
             plugin.getLogger().info("Removed " + removed + " leftover NPC label(s) in " + event.getWorld().getName() + ".");
+        }
+        // Island info holograms ("Minion Spot", "Travel to: Hub") were saved with the world; they are not used any more.
+        int holos = 0;
+        for (Entity e : event.getEntities()) {
+            if (e instanceof TextDisplay && e.getScoreboardTags().contains("sb_island_holo")) {
+                e.remove();
+                holos++;
+            }
+        }
+        if (holos > 0) {
+            islandHolosRemoved += holos;
+            plugin.getLogger().info("Removed " + holos + " island info hologram(s) at chunk " + event.getChunk().getX() + "," + event.getChunk().getZ()
+                    + " (total this run: " + islandHolosRemoved + ").");
         }
     }
 

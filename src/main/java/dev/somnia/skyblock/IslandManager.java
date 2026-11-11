@@ -286,22 +286,8 @@ final class IslandManager {
             int[] c = template.chest;
             fillChest(ox + c[0], GROUND_Y + c[1], oz + c[2], BlockFace.EAST, false);
         }
-        if (template.minion != null) {
-            int[] m = template.minion;
-            hologram(new Location(world, ox + m[0] + 0.5, GROUND_Y + m[1] + 1.2, oz + m[2] + 0.5),
-                    net.kyori.adventure.text.Component.text("Minion Spot", net.kyori.adventure.text.format.NamedTextColor.YELLOW)
-                            .append(net.kyori.adventure.text.Component.newline())
-                            .append(net.kyori.adventure.text.Component.text("Look here: /minion place", net.kyori.adventure.text.format.NamedTextColor.GRAY)));
-        }
-        if (template.portal != null) {
-            int[] p = template.portal;
-            String dest = template.portalDest == null || template.portalDest.equals("hub") ? "Hub" : plugin.hub().name(template.portalDest);
-            hologram(new Location(world, ox + p[0] + 0.5, GROUND_Y + p[1] + 3.2, oz + p[2] + 0.5),
-                    net.kyori.adventure.text.Component.text("Travel to:", net.kyori.adventure.text.format.NamedTextColor.GRAY)
-                            .append(net.kyori.adventure.text.Component.newline())
-                            .append(net.kyori.adventure.text.Component.text(dest, net.kyori.adventure.text.format.NamedTextColor.AQUA)));
-        }
-        blankIslandInfoSigns(ox, oz);
+        // No info holograms on islands (no sign-style text); the minion spot and the hub portal speak for themselves.
+        blankIslandInfoSigns(ox, oz, true); // a fresh paste brings the template signs back
         Block gen = world.getBlockAt(ox + GEN_DX, GROUND_Y, oz + GEN_DZ);
         if (gen.getType() != Material.COBBLESTONE) {
             plugin.getLogger().warning("Island template has no cobblestone at the generator spot (" + GEN_DX + ", 0, " + GEN_DZ + "); the generator will not regrow.");
@@ -986,50 +972,42 @@ final class IslandManager {
         torch(mx - 2, y, mz - 1);
     }
 
-    /** Clears text on plugin-written island signs (portal "Hub", generator "Cobble") without removing the blocks. */
+    /**
+     * Signs are not used in the game: the first time an island is seen by this build, every sign block in its area
+     * (template signs, the old portal "Hub" and generator "Cobble" signs) becomes air. Done once per island, so
+     * anything a player places later is left alone. Old island info holograms are removed by IslandGuide.
+     */
     private void blankIslandInfoSigns(int ox, int oz) {
+        blankIslandInfoSigns(ox, oz, false);
+    }
+
+    private void blankIslandInfoSigns(int ox, int oz, boolean force) {
         if (world == null) {
             return;
         }
-        // Generator island: wall sign east of the portal, post sign at the cobble generator.
-        blankSign(world.getBlockAt(ox + 3, GROUND_Y + 1, oz + 25));
-        blankSign(world.getBlockAt(ox + GEN_DX - 2, GROUND_Y, oz + GEN_DZ + 1));
-        if (template != null && template.portal != null) {
-            int[] p = template.portal;
-            int cx = ox + p[0];
-            int cy = GROUND_Y + p[1];
-            int cz = oz + p[2];
-            for (int x = cx - 4; x <= cx + 4; x++) {
-                for (int y = cy - 2; y <= cy + 6; y++) {
-                    for (int z = cz - 4; z <= cz + 4; z++) {
-                        blankSign(world.getBlockAt(x, y, z));
-                    }
+        String key = ox + "," + oz;
+        java.util.List<String> done = plugin.getConfig().getStringList("island-signs-cleared");
+        if (done.contains(key) && !force) {
+            return;
+        }
+        int removed = 0;
+        for (int cx = (ox - RADIUS) >> 4; cx <= (ox + RADIUS) >> 4; cx++) {
+            for (int cz = (oz - RADIUS) >> 4; cz <= (oz + RADIUS) >> 4; cz++) {
+                org.bukkit.Chunk chunk = world.getChunkAt(cx, cz);
+                for (org.bukkit.block.BlockState state : chunk.getTileEntities(b -> org.bukkit.Tag.ALL_SIGNS.isTagged(b.getType()), false)) {
+                    Block block = state.getBlock();
+                    block.setType(Material.AIR, false);
+                    removed++;
+                    plugin.getLogger().info("Removed island sign at " + block.getX() + "," + block.getY() + "," + block.getZ() + ".");
                 }
             }
         }
-    }
-
-    private void blankSign(Block block) {
-        String name = block.getType().name();
-        if (!name.endsWith("_SIGN") || !(block.getState() instanceof Sign sign)) {
-            return;
+        done = new java.util.ArrayList<>(done);
+        if (!done.contains(key)) {
+            done.add(key);
         }
-        boolean any = false;
-        for (Side side : Side.values()) {
-            org.bukkit.block.sign.SignSide face = sign.getSide(side);
-            for (int i = 0; i < 4; i++) {
-                String line = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(face.line(i));
-                if (line != null && !line.isBlank()) {
-                    any = true;
-                }
-                face.line(i, net.kyori.adventure.text.Component.empty());
-            }
-        }
-        if (!any) {
-            return;
-        }
-        sign.setWaxed(true);
-        sign.update(true, false);
-        plugin.getLogger().info("Cleared island sign at " + block.getX() + "," + block.getY() + "," + block.getZ() + ".");
+        plugin.getConfig().set("island-signs-cleared", done);
+        plugin.saveConfig();
+        plugin.getLogger().info("Island " + key + ": " + removed + " sign(s) removed (once per island).");
     }
 }

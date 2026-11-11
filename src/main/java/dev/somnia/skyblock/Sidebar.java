@@ -55,9 +55,46 @@ final class Sidebar {
                 show(player, plugin.profiles().get(player.getUniqueId()));
             }
         }, 40L, 40L);
+        plugin.getServer().getScheduler().runTaskTimer(plugin, this::tickArrows, 43L, 3L);
+    }
+
+    /** Sidebar line of "Objective <arrow>" and the arrow last painted there, per player. */
+    private final Map<UUID, Integer> arrowLine = new ConcurrentHashMap<>();
+    private final Map<UUID, String> arrows = new ConcurrentHashMap<>();
+
+    private static String header(String arrow) {
+        return "§fObjective §e" + arrow;
+    }
+
+    /**
+     * Every 3 ticks: recompute the objective arrow (8 directions relative to where the player looks) and repaint
+     * only that one line, and only when the direction bucket changed.
+     */
+    private void tickArrows() {
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            UUID id = player.getUniqueId();
+            Integer line = arrowLine.get(id);
+            Scoreboard board = boards.get(id);
+            if (line == null || board == null || player.getScoreboard() != board) {
+                continue;
+            }
+            Profile profile = plugin.profiles().get(id);
+            Quests.Step step = quests == null ? null : quests.current(profile);
+            String arrow = ObjectiveArrow.glyph(plugin, player, profile, step);
+            if (arrow.equals(arrows.get(id))) {
+                continue;
+            }
+            Team team = board.getTeam("l" + line);
+            if (team != null) {
+                team.prefix(LEGACY.deserialize(header(arrow)));
+                arrows.put(id, arrow);
+            }
+        }
     }
 
     void forget(UUID id) {
+        arrowLine.remove(id);
+        arrows.remove(id);
         boards.remove(id);
         BossBar bar = bars.remove(id);
         stt.remove(id);
@@ -185,7 +222,10 @@ final class Sidebar {
         raw.add("§fSTT: §6" + stt.getOrDefault(id, "…"));
         raw.add("");
         Quests.Step step = quests == null ? null : quests.current(profile);
-        raw.add("§fObjective §e»");
+        String arrow = plugin == null ? ObjectiveArrow.NONE : ObjectiveArrow.glyph(plugin, player, profile, step);
+        arrowLine.put(id, raw.size());
+        arrows.put(id, arrow);
+        raw.add(header(arrow));
         if (step == null) {
             raw.add("§eChampion's path");
         } else {

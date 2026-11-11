@@ -875,6 +875,7 @@ final class WordChain implements Listener {
             paint(player, seat.words);
             return;
         }
+        plugin.getLogger().info("Slot move write for " + player.getName() + ": " + dirty(seat.words, live).size() + " slot(s) " + dirty(seat.words, live) + ".");
         sendLayout(player, seat, live, List.of(), List.of(), List.of());
     }
 

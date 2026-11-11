@@ -80,6 +80,9 @@ final class Npcs {
         ArmorStand label = line(world, at.clone().add(0, CLICK_Y, 0), top, tag);
         ArmorStand nameLine = line(world, at.clone().add(0, NAME_Y, 0), Component.text(name, color), tag);
         NAME_LINES.add(nameLine.getUniqueId());
+        OWNED.put(body.getUniqueId(), tag);
+        OWNED.put(label.getUniqueId(), tag);
+        OWNED.put(nameLine.getUniqueId(), tag);
         hideFromLegacy(nameLine);
         return new Spawned(body.getUniqueId(), label.getUniqueId(), nameLine.getUniqueId());
     }
@@ -99,6 +102,22 @@ final class Npcs {
     /** 1.21.9: first protocol that has Mannequins natively. */
     private static final int MANNEQUIN_PROTOCOL = 773;
     private static final Set<UUID> NAME_LINES = ConcurrentHashMap.newKeySet();
+    /** Every body and label line spawned by this server run, with its NPC tag. Never saved, so disk copies are never in here. */
+    private static final java.util.Map<UUID, String> OWNED = new ConcurrentHashMap<>();
+
+    static boolean owned(UUID id) {
+        return OWNED.containsKey(id);
+    }
+
+    /** Forget an NPC's entities (they were removed on purpose). */
+    static void forget(UUID... ids) {
+        for (UUID id : ids) {
+            if (id != null) {
+                OWNED.remove(id);
+                NAME_LINES.remove(id);
+            }
+        }
+    }
 
     private static ArmorStand line(World world, Location at, Component text, String tag) {
         return world.spawn(at, ArmorStand.class, s -> {
@@ -128,7 +147,7 @@ final class Npcs {
             boolean ours = tags.contains(tag) && (tags.contains(TAG) || tags.contains("sb-holo") || tags.contains(LINE_TAG));
             String pdc = e.getPersistentDataContainer().get(LABEL_KEY, PersistentDataType.STRING);
             if (ours || tag.equals(pdc)) {
-                NAME_LINES.remove(e.getUniqueId());
+                forget(e.getUniqueId());
                 e.remove();
                 removed++;
             }
@@ -136,11 +155,15 @@ final class Npcs {
         return removed;
     }
 
-    /** Leftover NPC labels (any world, e.g. after a crash) are removed when their chunk loads; ours are never saved. */
+    /**
+     * Removes NPC label lines that no NPC of this run owns (copies from disk after a crash, older builds).
+     * EntitiesLoadEvent also lists entities that never left memory, so the owner registry decides, not the event.
+     */
     static int removeLeftovers(Iterable<? extends Entity> entities, java.util.Set<UUID> keep) {
         int removed = 0;
         for (Entity e : entities) {
             if ((e.getScoreboardTags().contains(LINE_TAG) || e.getPersistentDataContainer().has(LABEL_KEY, PersistentDataType.STRING))
+                    && !OWNED.containsKey(e.getUniqueId())
                     && (keep == null || !keep.contains(e.getUniqueId()))) {
                 NAME_LINES.remove(e.getUniqueId());
                 e.remove();
@@ -197,7 +220,10 @@ final class Npcs {
         });
     }
 
-    /** Counts per NPC tag: bodies and label lines that are alive now (control file "holo"). */
+    /**
+     * Control file "holo": per NPC (tag + spot), how many bodies and label lines exist right now, from the owner
+     * registry plus a scan of every loaded entity for tagged strays. Healthy is 1 body + 2 lines each, 0 strays.
+     */
     static String census() {
         java.util.Map<String, int[]> per = new java.util.TreeMap<>();
         int legacy = 0;
@@ -206,18 +232,29 @@ final class Npcs {
                 legacy++;
             }
         }
+        int gone = 0;
+        for (var en : new java.util.ArrayList<>(OWNED.entrySet())) {
+            Entity e = Bukkit.getEntity(en.getKey());
+            if (e == null || !e.isValid()) {
+                gone++; // chunk unloaded: keep it registered, it comes back with the chunk
+                continue;
+            }
+            boolean body = e instanceof Mannequin;
+            String key = en.getValue() + "@" + e.getWorld().getName() + ":" + e.getLocation().getBlockX() + "," + e.getLocation().getBlockZ();
+            per.computeIfAbsent(key, k -> new int[2])[body ? 0 : 1]++;
+        }
+        int strays = 0;
+        StringBuilder strayList = new StringBuilder();
         for (World w : Bukkit.getWorlds()) {
             for (Entity e : w.getEntities()) {
                 java.util.Set<String> tags = e.getScoreboardTags();
-                boolean body = tags.contains(TAG) && e instanceof Mannequin;
-                boolean line = tags.contains(LINE_TAG) || (e instanceof TextDisplay && tags.contains("sb-holo") && tags.stream().anyMatch(t -> t.startsWith("sb-npc:") || t.equals("sb-guide")));
-                if (!body && !line) {
-                    continue;
+                boolean tagged = (e instanceof Mannequin && tags.contains(TAG)) || tags.contains(LINE_TAG)
+                        || e.getPersistentDataContainer().has(LABEL_KEY, PersistentDataType.STRING);
+                if (tagged && !OWNED.containsKey(e.getUniqueId())) {
+                    strays++;
+                    strayList.append(e.getType().name().toLowerCase(java.util.Locale.ROOT)).append('@').append(w.getName()).append(':')
+                            .append(e.getLocation().getBlockX()).append(',').append(e.getLocation().getBlockZ()).append(' ');
                 }
-                String key = tags.stream().filter(t -> t.startsWith("sb-npc:") || t.equals("sb-guide")).findFirst().orElse("?")
-                        + "@" + w.getName() + ":" + e.getLocation().getBlockX() + "," + e.getLocation().getBlockZ();
-                int[] c = per.computeIfAbsent(key, k -> new int[2]);
-                c[body ? 0 : 1]++;
             }
         }
         int bad = 0;
@@ -226,10 +263,12 @@ final class Npcs {
             boolean ok = en.getValue()[0] == 1 && en.getValue()[1] == 2;
             if (!ok) {
                 bad++;
+                b.append(en.getKey()).append(" body=").append(en.getValue()[0]).append(" lines=").append(en.getValue()[1]).append("; ");
             }
-            b.append(en.getKey()).append(" body=").append(en.getValue()[0]).append(" lines=").append(en.getValue()[1]).append(ok ? "" : " !!").append("; ");
         }
-        return "NPCs " + per.size() + ", not 1 body + 2 lines: " + bad + ", legacy clients online: " + legacy + ". " + b;
+        return "NPCs " + per.size() + " (registered entities " + OWNED.size() + ", in unloaded chunks " + gone + "), not 1 body + 2 lines: " + bad
+                + ", strays: " + strays + (strays > 0 ? " [" + strayList.toString().trim() + "]" : "") + ", legacy clients online: " + legacy
+                + ", players online: " + Bukkit.getOnlinePlayers().size() + (b.isEmpty() ? "." : ". Bad: " + b);
     }
 
     private static Plugin owner() {

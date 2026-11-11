@@ -114,7 +114,7 @@ final class Chat implements Listener {
     }
 
     static final Map<String, List<String>> TIPS = Map.ofEntries(
-            Map.entry("plaza", List.of("Trade at the Grand Bazaar and the Auction House.", "The Bank keeps your Relic Pool shares.", "Portals north of the fountain: Private Island, Colosseum, Mine.")),
+            Map.entry("plaza", List.of("Trade at the Grand Bazaar and the Auction House.", "The Bank keeps your Relic Pool shares.", "The portal north of the fountain leads to your island. /warp for the rest.")),
             Map.entry("mine", List.of("Coal needs any pickaxe; iron and lapis a stone pick; gold, redstone and diamond an iron pick.", "The Mine Merchant buys your ore.", "The Deep Mines open soon.")),
             Map.entry("crypts", List.of("Crypt Wights hit hard. Wear armor.", "A Gilded Wight guards each crypt hall (rare gold).")),
             Map.entry("barrows", List.of("Barrow Shamblers rise between the graves.", "Hollow Villagers walk at night only.", "Collect Rotten Flesh for Barrow armor.")),

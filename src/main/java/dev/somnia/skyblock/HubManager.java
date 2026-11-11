@@ -107,6 +107,7 @@ final class HubManager implements Listener {
         world.setSpawnLocation(spawn());
         boolean place = plugin.getConfig().getInt("hub-layout", 0) < HUB_LAYOUT;
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::populate, 40L, 200L);
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> sparkles.removeLeftovers(), 60L);
         plugin.getServer().getScheduler().runTaskTimer(plugin, () -> fillPortals(false), 1200L, 1200L);
         java.io.File build = new java.io.File(plugin.getDataFolder(), BUILD_FILE);
         if (!build.isFile()) {
@@ -254,99 +255,78 @@ final class HubManager implements Listener {
         plugin.getServer().broadcast(Component.text("The hub is open again: /hub", NamedTextColor.GREEN));
     }
 
-    /**
-     * Blanks plugin-written portal signs and the quest-board placeholder signs.
-     * Sign blocks stay in place; portal names live on holograms only.
-     */
-    /** Sign positions of the build file; all of them are blank decoration (text lives on holograms). */
+    /** Sign positions of the build file. Signs are not used in the game at all, so every one of them is removed. */
     private final List<int[]> buildSigns = new ArrayList<>();
+    private int signsRemoved;
 
+    /** Removes the build's signs and any sign block in the loaded hub chunks (blocks become air, no block updates). */
     private void clearInfoSigns() {
+        if (world == null) {
+            return;
+        }
         int build = 0;
         for (int[] at : buildSigns) {
             if (world.isChunkLoaded(at[0] >> 4, at[2] >> 4) || world.loadChunk(at[0] >> 4, at[2] >> 4, false)) {
-                if (blankSign(world.getBlockAt(at[0], at[1], at[2]))) {
+                if (removeSign(world.getBlockAt(at[0], at[1], at[2]))) {
                     build++;
                 }
             }
         }
-        if (!buildSigns.isEmpty()) {
-            plugin.getLogger().info("Hub build signs checked: " + buildSigns.size() + ", blanked now: " + build + ".");
+        int loose = 0;
+        for (org.bukkit.Chunk chunk : world.getLoadedChunks()) {
+            loose += removeSigns(chunk);
         }
-        if (world == null) {
-            return;
-        }
-        int done = 0;
-        for (int[] at : boardSigns) {
-            done += blankSignsNear(at[0], at[1], at[2], 2);
-        }
-        if (zones != null) {
-            for (Zones.Portal p : zones.portals()) {
-                int cx = p.x();
-                int cy = p.y();
-                int cz = p.z();
-                if (p.min() != null && p.max() != null && p.min().length >= 3 && p.max().length >= 3) {
-                    cx = (p.min()[0] + p.max()[0]) / 2;
-                    cy = (p.min()[1] + p.max()[1]) / 2;
-                    cz = (p.min()[2] + p.max()[2]) / 2;
-                }
-                done += blankSignsNear(cx, cy, cz, 12);
-                if (p.labelAt() != null && p.labelAt().length >= 3) {
-                    done += blankSignsNear((int) Math.floor(p.labelAt()[0]), (int) Math.floor(p.labelAt()[1]),
-                            (int) Math.floor(p.labelAt()[2]), 2);
-                }
-            }
-        }
-        plugin.getLogger().info("Hub info signs cleared: " + done + ".");
+        plugin.getLogger().info("Hub signs: " + buildSigns.size() + " in the build file, removed now: " + build + " build + " + loose
+                + " other (total this run: " + signsRemoved + ").");
     }
 
-    private int blankSignsNear(int cx, int cy, int cz, int radius) {
+    /** Every sign block (standing, wall, hanging) in this chunk becomes air. */
+    private int removeSigns(org.bukkit.Chunk chunk) {
         int done = 0;
-        for (int x = cx - radius; x <= cx + radius; x++) {
-            for (int y = cy - radius; y <= cy + radius; y++) {
-                for (int z = cz - radius; z <= cz + radius; z++) {
-                    if (blankSign(world.getBlockAt(x, y, z))) {
-                        done++;
-                    }
-                }
+        for (org.bukkit.block.BlockState state : chunk.getTileEntities(block -> org.bukkit.Tag.ALL_SIGNS.isTagged(block.getType()), false)) {
+            if (removeSign(state.getBlock())) {
+                done++;
             }
         }
         return done;
     }
 
-    /** True when this sign had any text and was wiped. Leaves the block in place. */
-    private boolean blankSign(Block block) {
-        Material type = block.getType();
-        String name = type.name();
-        if (!name.endsWith("_SIGN")) {
-            return false;
+    /** Regrow spirits of older builds (they stayed for minutes and piled up) go away when their chunk's entities load. */
+    @EventHandler
+    public void onSpiritChunk(org.bukkit.event.world.EntitiesLoadEvent event) {
+        sparkles.removeLeftovers(event.getEntities(), "at chunk " + event.getChunk().getX() + "," + event.getChunk().getZ() + " in " + event.getWorld().getName());
+    }
+
+    @EventHandler
+    public void onHubChunk(org.bukkit.event.world.ChunkLoadEvent event) {
+        if (world == null || pasting || !event.getWorld().equals(world)) {
+            return;
         }
-        if (!(block.getState() instanceof org.bukkit.block.Sign sign)) {
+        int done = removeSigns(event.getChunk());
+        if (done > 0) {
+            plugin.getLogger().info("Hub chunk " + event.getChunk().getX() + "," + event.getChunk().getZ() + ": removed " + done + " sign(s) (total this run: " + signsRemoved + ").");
+        }
+    }
+
+    /** True when the block was a sign and is now air. Logs what it said. */
+    private boolean removeSign(Block block) {
+        if (!org.bukkit.Tag.ALL_SIGNS.isTagged(block.getType())) {
             return false;
         }
         StringBuilder was = new StringBuilder();
-        boolean any = false;
-        for (org.bukkit.block.sign.Side side : org.bukkit.block.sign.Side.values()) {
-            org.bukkit.block.sign.SignSide face = sign.getSide(side);
-            for (int i = 0; i < 4; i++) {
-                String line = PlainTextComponentSerializer.plainText().serialize(face.line(i));
-                if (line != null && !line.isBlank()) {
-                    any = true;
-                    if (!was.isEmpty()) {
-                        was.append(" | ");
+        if (block.getState() instanceof org.bukkit.block.Sign sign) {
+            for (org.bukkit.block.sign.Side side : org.bukkit.block.sign.Side.values()) {
+                for (int i = 0; i < 4; i++) {
+                    String line = PlainTextComponentSerializer.plainText().serialize(sign.getSide(side).line(i));
+                    if (line != null && !line.isBlank()) {
+                        was.append(was.isEmpty() ? "" : " | ").append(line);
                     }
-                    was.append(line);
                 }
-                face.line(i, Component.empty());
             }
         }
-        if (!any) {
-            return false;
-        }
-        sign.setWaxed(true);
-        sign.update(true, false);
-        plugin.getLogger().info("Cleared sign at " + block.getX() + "," + block.getY() + "," + block.getZ()
-                + " (was: " + was + ").");
+        block.setType(Material.AIR, false);
+        signsRemoved++;
+        plugin.getLogger().info("Removed hub sign at " + block.getX() + "," + block.getY() + "," + block.getZ() + (was.isEmpty() ? " (blank)." : " (was: " + was + ")."));
         return true;
     }
 
@@ -532,6 +512,30 @@ final class HubManager implements Listener {
     }
 
     /** Warp point for a district (its road gateway), or null. */
+    /** The nearest hub NPC with this role (bazaar, auction, merchant, blacksmith, quest, ...), or null. */
+    Location npcNear(Player player, String role) {
+        if (world == null || !isHub(player.getWorld())) {
+            return null;
+        }
+        Location best = null;
+        double bestD = Double.MAX_VALUE;
+        for (Map.Entry<UUID, Npc> e : npcByEntity.entrySet()) {
+            Npc npc = e.getValue();
+            String r = npc.kind() != null ? npc.kind() : roleOf(npc.id());
+            if (!role.equals(r)) {
+                continue;
+            }
+            Entity body = world.getEntity(e.getKey());
+            Location at = body != null && body.isValid() ? body.getLocation() : new Location(world, npc.x(), npc.y(), npc.z());
+            double d = at.distanceSquared(player.getLocation());
+            if (d < bestD) {
+                bestD = d;
+                best = at;
+            }
+        }
+        return best;
+    }
+
     Location warpPoint(String id) {
         if ("plaza".equals(id)) {
             return spawn();
@@ -574,7 +578,7 @@ final class HubManager implements Listener {
         plugin.profiles().save(profile);
         player.sendMessage(Component.text("Welcome to " + name("plaza") + ", the Somnia SkyBlock hub.", NamedTextColor.GOLD));
         player.sendMessage(Component.text("In " + name("plaza") + ": Bazaar, Auction House, Bank, Merchant and Blacksmith. " + name("relics") + " is just east of the town.", NamedTextColor.GRAY));
-        player.sendMessage(Component.text("The portals north of the fountain lead to your Private Island, the " + name("colosseum") + " and " + name("mine") + ". Deep Mines, the Event portal and the Dungeons open soon.", NamedTextColor.GRAY));
+        player.sendMessage(Component.text("The portal north of the fountain leads to your Private Island. /warp takes you to the other districts.", NamedTextColor.GRAY));
         player.sendMessage(Component.text("Peaceful: " + name("farm") + ", " + name("forest") + ", " + name("mountain") + " with the " + name("spire") + ", " + name("lake") + ", " + name("wharf") + ".", NamedTextColor.GRAY));
         player.sendMessage(Component.text("Combat: " + name("barrows") + ", " + name("ruins") + " and " + name("crypts") + " below " + name("mine") + ". The " + name("colosseum") + " is sealed until dungeons open.", NamedTextColor.GRAY));
         player.sendMessage(Component.text("Follow the roads out of " + name("plaza") + ". /quest shows your path, /is takes you home.", NamedTextColor.DARK_GRAY));
@@ -760,7 +764,7 @@ final class HubManager implements Listener {
             case "guide" -> Chat.npc(plugin, player, npc.name(), List.of(
                     "Welcome to " + name("plaza") + "!",
                     "The Grand Bazaar is east of the square, the Auction House west, the Bank by the east road.",
-                    "The portals north of the fountain lead to your island and " + name("mine") + ".",
+                    "The portal north of the fountain leads to your island. /warp takes you to the districts.",
                     "The Quest Giver south of the fountain has work for newcomers."), null);
             default -> Chat.npc(plugin, player, npc.name(), List.of(PLACEHOLDER.getOrDefault(npc.id(), "I'll have more to say soon. Come back later!")), null);
         }
@@ -1045,16 +1049,53 @@ final class HubManager implements Listener {
             if (plugin.getConfig().getInt("hub-layout", 0) != 9) {
                 return;
             }
-            String[] names = {"Private Island", "Embercrown Colosseum", "Darkvein Mine"};
-            for (int p = 0; p < 3; p++) {
-                fillSheet(names[p], List.of(PORTAL_FILL[p * 3], PORTAL_FILL[p * 3 + 1], PORTAL_FILL[p * 3 + 2]), org.bukkit.Axis.X, report);
+            fillSheet("Private Island", List.of(PORTAL_FILL[0], PORTAL_FILL[1], PORTAL_FILL[2]), org.bukkit.Axis.X, report);
+            for (int p = 1; p < 3; p++) {
+                clearSheet("old arch " + p, List.of(PORTAL_FILL[p * 3], PORTAL_FILL[p * 3 + 1], PORTAL_FILL[p * 3 + 2]), report);
             }
             return;
         }
         for (Zones.Portal p : list) {
-            if (!p.rows().isEmpty()) {
-                fillSheet(p.label() + " (" + p.id() + ")", p.rows(), "z".equalsIgnoreCase(p.axis()) ? org.bukkit.Axis.Z : org.bukkit.Axis.X, report);
+            if (p.rows().isEmpty()) {
+                continue;
             }
+            if (link(p)) {
+                fillSheet(p.label() + " (" + p.id() + ")", p.rows(), "z".equalsIgnoreCase(p.axis()) ? org.bukkit.Axis.Z : org.bukkit.Axis.X, report);
+            } else {
+                clearSheet(p.label() + " (" + p.id() + ")", p.rows(), report);
+            }
+        }
+    }
+
+    /**
+     * The only portal left in the hub is the island link. Mine, colosseum, event and dungeon arches are plain
+     * decoration now (districts are reached with /warp); the hub12 build will replace them.
+     */
+    static boolean link(Zones.Portal p) {
+        return p != null && "island".equals(p.dest());
+    }
+
+    /** Turns the portal sheet of a dropped arch into air (no block updates); the frame stays. */
+    private void clearSheet(String name, List<int[]> rows, boolean report) {
+        int cleared = 0;
+        for (int[] b : rows) {
+            if (!world.isChunkLoaded(b[0] >> 4, b[4] >> 4) && !report) {
+                return;
+            }
+            for (int x = b[0]; x <= b[1]; x++) {
+                for (int y = b[2]; y <= b[3]; y++) {
+                    for (int z = b[4]; z <= b[5]; z++) {
+                        Block block = world.getBlockAt(x, y, z);
+                        if (block.getType() == Material.NETHER_PORTAL) {
+                            block.setType(Material.AIR, false);
+                            cleared++;
+                        }
+                    }
+                }
+            }
+        }
+        if (cleared > 0) {
+            plugin.getLogger().info("Hub arch " + name + ": portal removed (" + cleared + " portal blocks cleared); use /warp.");
         }
     }
 
@@ -1153,7 +1194,7 @@ final class HubManager implements Listener {
         if (zones != null) {
             for (Zones.Portal p : zones.portals()) {
                 String key = "portal:" + p.dest();
-                if (alive(key) || !new Location(world, p.x(), p.y(), p.z()).isChunkLoaded()) {
+                if (!link(p) || alive(key) || !new Location(world, p.x(), p.y(), p.z()).isChunkLoaded()) {
                     continue;
                 }
                 boolean soon = comingSoon(p);
@@ -1193,12 +1234,7 @@ final class HubManager implements Listener {
                         name(e.getKey()).toUpperCase(java.util.Locale.ROOT) + "\n" + e.getValue()[0], (NamedTextColor) e.getValue()[1]);
             }
         }
-        for (Holo holo : metaHolos) {
-            if (alive("holo:" + holo.id()) || !new Location(world, holo.x(), holo.y(), holo.z()).isChunkLoaded()) {
-                continue;
-            }
-            holo("holo:" + holo.id(), holo.x(), holo.y(), holo.z(), holo.text(), holo.color());
-        }
+        // META holograms (the build's old sign texts) are no longer shown: no sign-style info text in the hub.
         for (Holo holo : HOLOS) {
             if (alive("holo:" + holo.id())) {
                 continue;
@@ -1311,7 +1347,7 @@ final class HubManager implements Listener {
         } catch (RuntimeException e) {
             plugin.getLogger().warning("Hub META holograms could not be read: " + e.getMessage());
         }
-        plugin.getLogger().info("Hub META holograms: " + metaHolos.size() + " shown, " + dropped + " dropped (non-English/placeholder/not in v1), "
+        plugin.getLogger().info("Hub META holograms: " + metaHolos.size() + " read, none shown (no sign-style holograms), " + dropped + " dropped (non-English/placeholder/not in v1), "
                 + dupes + " duplicates of portal or nearby labels.");
     }
 
@@ -1400,20 +1436,9 @@ final class HubManager implements Listener {
             return;
         }
         long now = System.currentTimeMillis();
-        Zones.Portal soon = isHub(to.getWorld()) && zones != null ? zones.portalAt(to) : null;
-        if (soon != null && comingSoon(soon)) {
-            // Not built yet: bounce back out of the sheet with a short note.
-            Block fromBlock = from.getBlock();
-            if (fromBlock.getType() != Material.NETHER_PORTAL && fromBlock.getRelative(BlockFace.UP).getType() != Material.NETHER_PORTAL) {
-                event.setTo(from.clone().setDirection(to.getDirection()));
-            }
-            player.sendActionBar(Component.text(soon.label() + ": coming soon!", NamedTextColor.YELLOW));
-            Long said = soonAt.get(player.getUniqueId());
-            if (said == null || now - said > 5000) {
-                soonAt.put(player.getUniqueId(), now);
-                player.sendMessage(Component.text(soon.label() + " is coming soon. This portal opens in a later update.", NamedTextColor.YELLOW));
-            }
-            return;
+        Zones.Portal at = isHub(to.getWorld()) && zones != null ? zones.portalAt(to) : null;
+        if (at != null && !link(at)) {
+            return; // dropped arch: a leftover portal block does nothing, /warp is the way
         }
         Long last = portalAt.get(player.getUniqueId());
         if (last != null && now - last < 1500) {
@@ -1422,34 +1447,10 @@ final class HubManager implements Listener {
         portalAt.put(player.getUniqueId(), now);
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (to.getWorld().equals(plugin.islands().world())) {
-            String dest = profile.islandPortalDest;
-            Location warp = dest == null || dest.isBlank() || dest.equals("hub") ? null
-                    : "colosseum".equals(dest) ? gate() : warpPoint(dest);
-            if (warp != null) {
-                player.teleport(warp);
-                player.setFallDistance(0);
-                greet(player, profile);
-                player.sendMessage(Component.text("The portal brought you to " + name(dest) + ". /is goes home.", NamedTextColor.GREEN));
-                return;
-            }
+            // The island portal is the island <-> hub link only (no warps as portals).
             teleport(player);
             greet(player, profile);
             player.sendMessage(Component.text("The portal brought you to the hub. /is goes home.", NamedTextColor.GREEN));
-            return;
-        }
-        Zones.Portal portal = isHub(to.getWorld()) && zones != null ? zones.portalAt(to) : null;
-        if (portal != null && !"island".equals(portal.dest())) {
-            switch (portal.dest()) {
-                case "colosseum" -> toColosseum(player);
-                default -> {
-                    Location at = warpPoint(portal.dest());
-                    if (at != null) {
-                        player.teleport(at);
-                        player.setFallDistance(0);
-                        player.sendMessage(Component.text("Warped to " + portal.label() + ".", NamedTextColor.GREEN));
-                    }
-                }
-            }
             return;
         }
         if (isHub(to.getWorld())) {

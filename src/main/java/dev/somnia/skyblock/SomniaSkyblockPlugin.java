@@ -224,6 +224,10 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         return profiles;
     }
 
+    IslandGuide guide() {
+        return guide;
+    }
+
     IslandManager islands() {
         return islands;
     }
