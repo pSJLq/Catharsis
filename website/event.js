@@ -95,6 +95,10 @@ function diffBy(now, base) {
   return out;
 }
 
+function ineligible(p) {
+  return !!(p && (p.dev || p.excluded));
+}
+
 function flag(uuid, type, value, text) {
   const list = state.flags[uuid] || (state.flags[uuid] = []);
   const row = list.find((f) => f.type === type);
@@ -109,11 +113,11 @@ function flag(uuid, type, value, text) {
 function checkFlags(b) {
   const ipCount = {};
   for (const p of b.players || []) {
-    if (p.dev || !p.ipTag || p.lastSeen < state.start) continue;
+    if (ineligible(p) || !p.ipTag || p.lastSeen < state.start) continue;
     ipCount[p.ipTag] = (ipCount[p.ipTag] || 0) + 1;
   }
   for (const p of b.players || []) {
-    if (p.dev || p.lastSeen < state.start) continue;
+    if (ineligible(p) || p.lastSeen < state.start) continue;
     const rate = p.rate || {};
     for (const [skill, limit] of Object.entries(LIMITS)) {
       const v = (rate.xpHour || {})[skill] || 0;
@@ -140,13 +144,14 @@ function standings(b) {
   let players = 0;
   for (const p of b.players || []) {
     if (p.lastSeen < state.start) continue;
-    if (!p.dev) players++;
+    const excluded = ineligible(p);
+    if (!excluded) players++;
     const from = base.players[p.uuid] || { sbXp: 0, level: 0, tx: 0, txBy: {} };
     const xp = Math.max(0, (p.sbXp || 0) - from.sbXp);
     const lv = Math.max(0, (p.level || 0) - from.level);
     const tx = Math.max(0, (p.tx || 0) - from.tx);
     if (xp === 0 && lv === 0 && tx === 0) continue;
-    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, level: p.level || 0, levelGained: lv, xpGained: xp, tx, txBy: diffBy(p.txBy, from.txBy) });
+    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, excluded, level: p.level || 0, levelGained: lv, xpGained: xp, tx, txBy: diffBy(p.txBy, from.txBy) });
   }
   rows.sort((a, c) => c.levelGained - a.levelGained || c.xpGained - a.xpGained || c.tx - a.tx || a.name.localeCompare(c.name));
   return {
@@ -197,7 +202,7 @@ function json(res, status, body) {
 function publicView() {
   const now = Date.now();
   const last = state.last || { at: 0, rows: [], stats: { tx: 0, players: 0, txBy: {} } };
-  const rows = last.rows.filter((r) => !r.dev && !state.dq[r.uuid]).slice(0, 100).map((r, i) => ({
+  const rows = last.rows.filter((r) => !ineligible(r) && !state.dq[r.uuid]).slice(0, 100).map((r, i) => ({
     rank: i + 1,
     name: r.name,
     level: r.level,

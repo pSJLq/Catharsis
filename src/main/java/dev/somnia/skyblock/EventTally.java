@@ -290,11 +290,53 @@ final class EventTally implements Listener {
 
     // ------------------------------------------------------------------ output
 
-    private String board(long now) {
-        java.util.Set<String> devs = new java.util.HashSet<>();
+    private static final String[] DEFAULT_EXCLUDED_WALLETS = {
+            "0x2Ba34FC1479d17A7B1F6539b73D624d4143b848E",
+            "0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6"
+    };
+
+    private java.util.Set<String> devNames() {
+        java.util.Set<String> names = new java.util.HashSet<>();
         for (String n : plugin.getConfig().getStringList("dev-accounts")) {
-            devs.add(n.toLowerCase(Locale.ROOT));
+            if (n != null && !n.isBlank()) {
+                names.add(n.toLowerCase(Locale.ROOT));
+            }
         }
+        return names;
+    }
+
+    private java.util.Set<String> excludedWallets() {
+        java.util.Set<String> wallets = new java.util.HashSet<>();
+        for (String a : DEFAULT_EXCLUDED_WALLETS) {
+            wallets.add(a.toLowerCase(Locale.ROOT));
+        }
+        for (String a : plugin.getConfig().getStringList("event-excluded-wallets")) {
+            if (a != null && !a.isBlank()) {
+                wallets.add(a.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return wallets;
+    }
+
+    private boolean isDevName(Rec r, java.util.Set<String> devs) {
+        return r.name != null && !r.name.isBlank() && devs.contains(r.name.toLowerCase(Locale.ROOT));
+    }
+
+    /** Dev-accounts and owner/admin purses never take event prizes. */
+    private boolean isExcluded(UUID uuid, Rec r, java.util.Set<String> devs, java.util.Set<String> wallets) {
+        if (isDevName(r, devs)) {
+            return true;
+        }
+        Profile profile = plugin.profiles().get(uuid);
+        if (profile == null || profile.wallet == null || profile.wallet.isBlank()) {
+            return false;
+        }
+        return wallets.contains(profile.wallet.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private String board(long now) {
+        java.util.Set<String> devs = devNames();
+        java.util.Set<String> wallets = excludedWallets();
         JsonObject root = new JsonObject();
         root.addProperty("v", 1);
         root.addProperty("at", now);
@@ -306,7 +348,8 @@ final class EventTally implements Listener {
             JsonObject o = new JsonObject();
             o.addProperty("uuid", e.getKey().toString());
             o.addProperty("name", r.name == null ? "" : r.name);
-            o.addProperty("dev", r.name != null && devs.contains(r.name.toLowerCase(Locale.ROOT)));
+            o.addProperty("dev", isDevName(r, devs));
+            o.addProperty("excluded", isExcluded(e.getKey(), r, devs, wallets));
             o.addProperty("online", Bukkit.getPlayer(e.getKey()) != null);
             o.addProperty("level", r.level);
             o.addProperty("sbXp", r.sbXp);

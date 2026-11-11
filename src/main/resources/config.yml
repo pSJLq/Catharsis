@@ -36,4 +36,8 @@ auth:
 
 # Accounts that may use /dev (op + admin for one session, only after /login).
 # Leave empty in this repository. Set names on your own server.
+# They, and event-excluded-wallets, never appear on the public event leaderboard or take prizes.
 dev-accounts: []
+event-excluded-wallets:
+  - '0x2Ba34FC1479d17A7B1F6539b73D624d4143b848E'
+  - '0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6'
