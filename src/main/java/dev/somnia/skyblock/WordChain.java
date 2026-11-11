@@ -601,6 +601,9 @@ final class WordChain implements Listener {
 
     /** True while ingredients sit in a crafting grid: they are out of the bag view but not gone. */
     private boolean craftGridBusy(Player player) {
+        if (plugin.craft() != null && plugin.craft().gridBusy(player)) {
+            return true;
+        }
         Inventory top = player.getOpenInventory().getTopInventory();
         if (!(top instanceof CraftingInventory crafting)) {
             return false;
