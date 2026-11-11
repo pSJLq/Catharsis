@@ -48,6 +48,8 @@ final class HubManager implements Listener {
     private static final long REGEN_TICKS = 500L;
 
     private final SomniaSkyblockPlugin plugin;
+    private final Sparkles sparkles;
+    private boolean stopping;
     private final Map<Long, Material> ores = new HashMap<>();
     private final Map<UUID, Long> portalAt = new HashMap<>();
     private World world;
@@ -63,6 +65,7 @@ final class HubManager implements Listener {
     private volatile String pasteStatus = "idle";
 
     HubManager(SomniaSkyblockPlugin plugin) {
+        this.sparkles = new Sparkles(plugin);
         this.plugin = plugin;
     }
 
@@ -1812,7 +1815,15 @@ final class HubManager implements Listener {
                 return;
             }
             place(spot, d);
+            sparkle(spot);
         }, FLORA_TICKS);
+    }
+
+    /** Regrow cue for plants: sparkle trail from the area's hovering spirit down to the block (see Sparkles). */
+    private void sparkle(Block block) {
+        if (!stopping) {
+            sparkles.regrow(block);
+        }
     }
 
     /** Sets a plant, both halves for tall grass / large fern. */
@@ -2108,7 +2119,11 @@ final class HubManager implements Listener {
             return;
         }
         try {
-            place(at.getBlock(), ripe(original));
+            org.bukkit.block.data.BlockData back = ripe(original);
+            place(at.getBlock(), back);
+            if (isFlora(back.getMaterial()) || CROPS.contains(back.getMaterial())) {
+                sparkle(at.getBlock());
+            }
         } catch (IllegalArgumentException e) {
             plugin.getLogger().warning("Regen could not restore " + original + ": " + e.getMessage());
         }
@@ -2116,6 +2131,8 @@ final class HubManager implements Listener {
 
     /** Server stop: every block still in a regen chain goes back to its grown state. */
     void restoreRegen() {
+        stopping = true;
+        sparkles.clear();
         int n = 0;
         for (Long k : new ArrayList<>(regen.keySet())) {
             restore(k);
