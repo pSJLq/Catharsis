@@ -798,8 +798,8 @@ final class HubManager implements Listener {
                     step.hint(),
                     "Come back any time. /quest shows the whole path.");
         } else {
-            lines = List.of("You have done everything I asked. " + name("plaza") + " is lucky to have you!",
-                    "More quests SOON. If you enjoy the server, donations keep it running: " + Quests.DONATE);
+            lines = List.of("You have done everything I asked. " + name("plaza") + " is lucky to have you!");
+            after = () -> Quests.finale(player);
         }
         Chat.npc(plugin, player, npc.name(), lines, after);
     }

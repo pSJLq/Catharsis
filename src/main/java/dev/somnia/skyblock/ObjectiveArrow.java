@@ -70,7 +70,6 @@ final class ObjectiveArrow {
             case "forge_sword", "forge_armor" -> inHub ? plugin.hub().npcNear(player, "blacksmith") : null;
             case "talk_bank" -> inHub ? plugin.hub().npcNear(player, "bank") : null;
             case "fish" -> inHub ? plugin.hub().warpPoint("wharf") : null;
-            case "wave" -> inHub ? plugin.hub().warpPoint("colosseum") : null;
             case "sell" -> inHub ? plugin.hub().npcNear(player, "merchant") : null;
             case "bazaar" -> inHub ? plugin.hub().npcNear(player, "bazaar") : null;
             case "auction" -> inHub ? plugin.hub().npcNear(player, "auction") : null;

@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * The intro quest line (v2), given by Wren on the island and the Quest Giver in the hub. It follows the order of the
  * wiki's starter quests: your island by hand (log, crafting, a wooden pickaxe, cobblestone, a minion), then the hub
  * (logs, crops, selling, ore, the Banker and your purse), then combat (a sword, the undead, armor, skills that give
- * Health/Defense/Strength, a practice Colosseum wave, the wolves), then trading (Bazaar, Auction House) and exploring.
+ * Health/Defense/Strength, the wolves), then trading (Bazaar, Auction House) and exploring.
  *
  * Every finished step is worth 5 SkyBlock XP (wiki SkyBlock Levels: +5 per objective); Skills.skyblockXp counts
  * {@link #completed(Profile)}. Extra coin/skill rewards are only the wiki numbers of the matching starter quest
@@ -67,7 +67,8 @@ final class Quests implements Listener {
 
     /** Wiki SkyBlock Levels: +5 SkyBlock XP per objective completed. */
     static final int SKYBLOCK_XP = 5;
-    static final int VERSION = 2;
+    /** 2 = the 23-step line; 3 = the same without the Colosseum wave (the Colosseum is sealed, Arena.ENABLED = false). */
+    static final int VERSION = 3;
     /** Same address as the website footer's Donate button. */
     static final String DONATE = "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D";
     /** Hub districts counted by the exploring step. */
@@ -98,7 +99,7 @@ final class Quests implements Listener {
             new Step("hub_ore", 10, 0, Skills.Skill.MINING, 20, "Mine 10 ore in {mine}",
                     "Coal needs any pickaxe, iron and lapis a stone pickaxe. Mined ore grows back after a while."),
             new Step("talk_bank", 1, 0, null, 0, "Visit the Banker",
-                    "The Banker shows your purse and the Relic Pool. Onchain actions pay a little STT gas from your purse; /deposit shows its address."),
+                    "The Banker shows your purse. Onchain actions pay a little STT gas from it; /deposit shows its address and the faucet."),
             new Step("forge_sword", 1, 0, null, 0, "Forge a sword at the Blacksmith",
                     "Don't fight bare-handed. The Undead Sword costs 150 coins at the Blacksmith in {plaza}."),
             new Step("kill_graveyard", 10, 100, Skills.Skill.COMBAT, 15, "Slay 10 undead in {barrows}",
@@ -109,8 +110,6 @@ final class Quests implements Listener {
                     "You got a Fishing Rod. Cast it into any water, {wharf} is the classic spot. Fishing gives Health."),
             new Step("level", 3, 0, null, 0, "Reach Combat 3",
                     "Every mob you slay gives Combat XP. Farming and Fishing add Health, Mining Defense, Foraging Strength."),
-            new Step("wave", 1, 0, null, 0, "Clear a wave in the {colosseum}",
-                    "Talk to the Arena Warden and start a practice run. Practice needs no STT."),
             new Step("kill_ruins", 5, 0, null, 0, "Hunt 5 beasts in {ruins}",
                     "Wolves and bone archers guard the ruins and hit hard. Come with a sword, armor and some skill levels."),
             new Step("bazaar", 1, 0, null, 0, "Make your first Bazaar trade",
@@ -171,6 +170,19 @@ final class Quests implements Listener {
     static boolean migrate(Profile profile) {
         if (profile.questVersion >= VERSION) {
             return false;
+        }
+        if (profile.questVersion == 2) {
+            // v2 -> v3: the "wave" step (v2 index 17) is gone. It could never be finished (the Colosseum is sealed),
+            // so nobody is past it; a player standing on it moves on to the next step with fresh progress.
+            final int wave = 17;
+            if (profile.questStep == wave) {
+                profile.questProgress = 0;
+            } else if (profile.questStep > wave) {
+                profile.questStep--;
+            }
+            profile.questSkip.remove("wave");
+            profile.questVersion = VERSION;
+            return true;
         }
         int oldStep = Math.max(0, Math.min(profile.questStep, V1.size()));
         int oldProgress = profile.questProgress;
@@ -410,8 +422,13 @@ final class Quests implements Listener {
     static void finale(Player player) {
         player.sendMessage(Component.text("  You finished every quest we have so far. More quests SOON!", NamedTextColor.LIGHT_PURPLE));
         player.sendMessage(Component.text("  Enjoying the server? Donations keep it running:", NamedTextColor.GRAY));
-        player.sendMessage(Component.text("  " + DONATE, NamedTextColor.AQUA)
-                .clickEvent(ClickEvent.copyToClipboard(DONATE)));
+        // Same style as /deposit: underlined address, click copies it, hover says so, green [Copy].
+        player.sendMessage(Component.text("  ")
+                .append(Component.text(DONATE, NamedTextColor.AQUA, TextDecoration.UNDERLINED)
+                        .clickEvent(ClickEvent.copyToClipboard(DONATE))
+                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Click to copy", NamedTextColor.YELLOW)))
+                        .append(Component.text("  [Copy]", NamedTextColor.GREEN, TextDecoration.BOLD)
+                                .decoration(TextDecoration.UNDERLINED, false))));
     }
 
     void show(Player player) {
