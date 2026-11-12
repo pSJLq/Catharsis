@@ -349,6 +349,32 @@ final class WalletService {
         return sendData(profile, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
+    /** SkyIsland2.ownerOf(deed), or null when the deed does not exist. */
+    String islandOwner(BigInteger deed) throws IOException {
+        if (deed == null || deed.signum() <= 0) {
+            return null;
+        }
+        Function function = new Function("ownerOf", List.of(new Uint256(deed)), List.of(new TypeReference<Address>() {
+        }));
+        String raw = call("0x0000000000000000000000000000000000000000", contract(), function);
+        if (raw == null || raw.equals("0x")) {
+            return null;
+        }
+        @SuppressWarnings("rawtypes")
+        List<Type> decoded = FunctionReturnDecoder.decode(raw, function.getOutputParameters());
+        if (decoded.isEmpty()) {
+            return null;
+        }
+        String owner = decoded.get(0).getValue().toString();
+        return owner.equalsIgnoreCase("0x0000000000000000000000000000000000000000") ? null : owner;
+    }
+
+    /** SkyIsland2.invite(member) from the island owner's purse (attested; the owner pays the gas). */
+    String inviteToIsland(Profile owner, String member) throws Exception {
+        Function function = new Function("invite", List.of(new Address(member)), Collections.emptyList());
+        return sendData(owner, contract(), FunctionEncoder.encode(function), 8_000_000L);
+    }
+
 
 
     BigInteger[] wordsOf(String player) throws IOException {

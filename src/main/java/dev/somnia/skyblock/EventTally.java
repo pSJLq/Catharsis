@@ -57,6 +57,8 @@ final class EventTally implements Listener {
         String ipTag;
         int level;
         int sbXp;
+        /** Event score basis: SkyBlock XP with only this player's own collection contributions (no co-op share). */
+        int evXp;
         /** Profile.resets seen together with sbXp: the website restarts the player's event count when it changes. */
         int epoch;
         final long[] xp = new long[Skills.Skill.values().length];
@@ -134,6 +136,40 @@ final class EventTally implements Listener {
             return "market";
         }
         return "other";
+    }
+
+    private static volatile long windowMtime = -1;
+    private static volatile long[] window = {0, 0, 0};
+
+    /**
+     * True while the website event runs. The site writes event/window.json (start, end, stoppedAt in ms) whenever
+     * it saves its event state; no file means no event.
+     */
+    static boolean eventRunning() {
+        EventTally t = instance;
+        if (t == null) {
+            return false;
+        }
+        try {
+            File f = new File(t.dir, "window.json");
+            if (!f.exists()) {
+                return false;
+            }
+            long m = f.lastModified();
+            if (m != windowMtime) {
+                JsonObject o = JsonParser.parseString(Files.readString(f.toPath(), StandardCharsets.UTF_8)).getAsJsonObject();
+                window = new long[]{o.has("start") ? o.get("start").getAsLong() : 0, o.has("end") ? o.get("end").getAsLong() : 0,
+                        o.has("stoppedAt") ? o.get("stoppedAt").getAsLong() : 0};
+                windowMtime = m;
+            }
+            return running(window, System.currentTimeMillis());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static boolean running(long[] w, long now) {
+        return w[0] > 0 && now >= w[0] && now < w[1] && w[2] == 0;
     }
 
     /** Right after a full profile reset (main thread): take the new (zeroed) totals and epoch at once. */
@@ -245,6 +281,7 @@ final class EventTally implements Listener {
         synchronized (profile) {
             r.epoch = profile.resets;
             r.sbXp = Skills.skyblockXp(profile);
+            r.evXp = Skills.skyblockXpOwn(profile);
             r.level = r.sbXp / 100;
             for (Skills.Skill s : Skills.Skill.values()) {
                 r.xp[s.ordinal()] = Skills.xp(profile, s);
@@ -368,6 +405,19 @@ final class EventTally implements Listener {
             o.addProperty("level", r.level);
             o.addProperty("sbXp", r.sbXp);
             o.addProperty("epoch", r.epoch);
+            o.addProperty("evXp", r.evXp);
+            Profile prof = plugin.profiles().get(e.getKey());
+            if (prof != null && prof.wallet != null && !prof.wallet.isBlank()) {
+                String wt = tag("w:" + prof.wallet.trim().toLowerCase(Locale.ROOT));
+                if (wt != null) {
+                    o.addProperty("walletTag", wt);
+                }
+            }
+            Coops coops = Coops.get();
+            Coops.Coop coop = coops == null ? null : coops.of(e.getKey());
+            if (coop != null && coop.size() > 1) {
+                o.addProperty("coop", coop.owner.toString());
+            }
             JsonObject skills = new JsonObject();
             JsonObject hour = new JsonObject();
             for (Skills.Skill s : Skills.Skill.values()) {

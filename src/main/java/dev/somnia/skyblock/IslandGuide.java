@@ -44,7 +44,8 @@ final class IslandGuide implements Listener {
             return;
         }
         for (Player player : world.getPlayers()) {
-            Profile profile = plugin.profiles().get(player.getUniqueId());
+            // One Wren per island: co-op members share the owner's.
+            Profile profile = Coops.host(plugin.profiles().get(player.getUniqueId()));
             if (!profile.islandReady || !plugin.islands().contains(profile, player.getLocation())) {
                 continue;
             }
@@ -93,7 +94,7 @@ final class IslandGuide implements Listener {
 
     /** Where Wren stands on this player's island (her entity, else her spot), or null. For the objective arrow. */
     Location wren(World world, Profile profile) {
-        UUID[] ids = spawned.get(profile.uuid);
+        UUID[] ids = spawned.get(Coops.host(profile).uuid);
         if (ids != null) {
             Entity v = world.getEntity(ids[0]);
             if (v != null && v.isValid()) {

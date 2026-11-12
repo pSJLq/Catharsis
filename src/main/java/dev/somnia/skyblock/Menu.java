@@ -36,9 +36,9 @@ class Menu implements InventoryHolder {
         inventory.setItem(10, skill(Material.IRON_PICKAXE, "Mining", profile.miningXp));
         inventory.setItem(12, skill(Material.WHEAT, "Farming", profile.farmingXp));
         inventory.setItem(14, skill(Material.OAK_LOG, "Foraging", profile.foragingXp));
-        inventory.setItem(19, collection(Material.COBBLESTONE, "Cobblestone", Collects.amount(profile, Collects.ENTRIES.get(3)), "Enchanted craft at 100"));
-        inventory.setItem(21, collection(Material.OAK_LOG, "Oak", Collects.amount(profile, Collects.ENTRIES.get(9)), "Enchanted craft at 100"));
-        inventory.setItem(23, collection(Material.WHEAT, "Wheat", Collects.amount(profile, Collects.ENTRIES.get(0)), "Collection only for now"));
+        inventory.setItem(19, collection(Material.COBBLESTONE, "Cobblestone", Collects.shared(profile, Collects.ENTRIES.get(3)), "Enchanted craft at 100"));
+        inventory.setItem(21, collection(Material.OAK_LOG, "Oak", Collects.shared(profile, Collects.ENTRIES.get(9)), "Enchanted craft at 100"));
+        inventory.setItem(23, collection(Material.WHEAT, "Wheat", Collects.shared(profile, Collects.ENTRIES.get(0)), "Collection only for now"));
         inventory.setItem(16, item(Material.GOLD_INGOT, "Purse", List.of(
                 profile.wallet == null || profile.wallet.isBlank() ? "No purse yet" : profile.wallet,
                 "You pay gas from this balance.",

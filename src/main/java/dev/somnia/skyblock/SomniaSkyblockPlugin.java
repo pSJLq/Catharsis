@@ -8,6 +8,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class SomniaSkyblockPlugin extends JavaPlugin {
     private ProfileStore profiles;
     private IslandManager islands;
+    private Coops coops;
     private HubManager hub;
     private ChainClient chain;
     private Sidebar sidebar;
@@ -60,6 +61,15 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
             getCommand(name).setTabCompleter(auth);
         }
         islands = new IslandManager(this);
+        coops = new Coops(this);
+        getServer().getPluginManager().registerEvents(coops, this);
+        for (String name : new String[]{"coop", "coopadd", "coopkick", "coopchat", "coopclear", "coopsalvage"}) {
+            if (getCommand(name) == null) {
+                throw new IllegalStateException("plugin.yml has no command /" + name);
+            }
+            getCommand(name).setExecutor(coops);
+            getCommand(name).setTabCompleter(coops);
+        }
         hub = new HubManager(this);
         getServer().getPluginManager().registerEvents(hub, this);
         chain = new ChainClient(this);
@@ -239,6 +249,10 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
 
     IslandGuide guide() {
         return guide;
+    }
+
+    Coops coops() {
+        return coops;
     }
 
     IslandManager islands() {

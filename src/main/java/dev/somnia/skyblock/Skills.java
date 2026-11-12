@@ -160,7 +160,17 @@ final class Skills implements Listener {
     }
 
     /** SkyBlock XP: skill levels, collection tiers, quests and discovered areas. Level = XP / 100. */
+    /** SkyBlock XP as shown in game: collection tiers count the whole co-op's collection (shared, like Hypixel). */
     static int skyblockXp(Profile p) {
+        return skyblockXp(p, true);
+    }
+
+    /** The same XP with only this player's own collection contributions; the event leaderboard ranks on this. */
+    static int skyblockXpOwn(Profile p) {
+        return skyblockXp(p, false);
+    }
+
+    static int skyblockXp(Profile p, boolean shared) {
         int xp = 0;
         for (Skill s : Skill.values()) {
             int level = level(p, s);
@@ -169,7 +179,7 @@ final class Skills implements Listener {
             }
         }
         for (Collects.Entry entry : Collects.ENTRIES) {
-            xp += 4 * ProgressMath.tier(Collects.amount(p, entry));
+            xp += 4 * ProgressMath.tier(shared ? Collects.shared(p, entry) : Collects.amount(p, entry));
         }
         xp += Quests.SKYBLOCK_XP * Quests.xpSteps(p);
         for (String key : p.discovered) {

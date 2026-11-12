@@ -10,6 +10,8 @@ import { fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataFile = path.join(here, 'data', 'event.json');
 const boardFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'board.json');
+// The plugin reads this to limit self-made profile resets while an event runs (one per 24 h per player).
+const windowFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'window.json');
 
 export const PRIZES = [100, 50];
 const HOUR = 3600 * 1000;
@@ -29,7 +31,8 @@ const RULES = {
   steadyActiveMinutes: 55, // of the last 60 minutes, with
   steadyCv: 0.1, // per-minute action counts almost identical (coefficient of variation below this)
   gapCv: 0.05, // and the last 300+ action intervals near-identical (macro timing)
-  sharedIp: 3, // accounts on one public IP since the start
+  sharedIp: 2, // accounts on one public IP since the start (possible alt accounts; co-op friends at home too)
+  resetsFlag: 1, // profile resets (menu reset, co-op join/leave/kick) during the event, for admin review
 };
 
 let state = load();
@@ -52,6 +55,26 @@ function save() {
   const tmp = dataFile + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(state));
   fs.renameSync(tmp, dataFile);
+  try {
+    const w = JSON.stringify({ start: state.start || 0, end: state.end || 0, stoppedAt: state.stoppedAt || 0 });
+    let old = null;
+    try { old = fs.readFileSync(windowFile, 'utf8'); } catch (error) { old = null; }
+    if (old !== w) {
+      fs.writeFileSync(windowFile + '.tmp', w);
+      fs.renameSync(windowFile + '.tmp', windowFile);
+    }
+  } catch (error) {
+    // the plugin folder may be missing in a dev checkout
+  }
+}
+
+// Event score basis: SkyBlock XP counting only the player's own collection part (co-op shares excluded).
+export function scoreOf(p) {
+  return Number.isFinite(p && p.evXp) ? p.evXp : (p && p.sbXp) || 0;
+}
+
+function baseXp(from) {
+  return Number.isFinite(from.xp) ? from.xp : from.sbXp || 0;
 }
 
 function readBoard() {
@@ -81,7 +104,7 @@ function endsAt() {
 function snapshot(b) {
   const players = {};
   for (const p of b.players || []) {
-    players[p.uuid] = { sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: p.txBy || {}, epoch: p.epoch || 0 };
+    players[p.uuid] = { xp: scoreOf(p), sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: p.txBy || {}, epoch: p.epoch || 0, bestXp: 0, bestLv: 0, resets: 0 };
   }
   return { at: b.at, tx: b.tx || 0, txBy: b.txBy || {}, players };
 }
@@ -112,9 +135,11 @@ function flag(uuid, type, value, text) {
 
 function checkFlags(b) {
   const ipCount = {};
+  const walletCount = {};
   for (const p of b.players || []) {
-    if (ineligible(p) || !p.ipTag || p.lastSeen < state.start) continue;
-    ipCount[p.ipTag] = (ipCount[p.ipTag] || 0) + 1;
+    if (ineligible(p) || p.lastSeen < state.start) continue;
+    if (p.ipTag) ipCount[p.ipTag] = (ipCount[p.ipTag] || 0) + 1;
+    if (p.walletTag) walletCount[p.walletTag] = (walletCount[p.walletTag] || 0) + 1;
   }
   for (const p of b.players || []) {
     if (ineligible(p) || p.lastSeen < state.start) continue;
@@ -133,7 +158,10 @@ function checkFlags(b) {
       flag(p.uuid, 'macro', rate.gapCv, 'machine-regular action timing (interval CV ' + rate.gapCv + ')');
     }
     if (p.ipTag && ipCount[p.ipTag] >= RULES.sharedIp) {
-      flag(p.uuid, 'shared-ip', ipCount[p.ipTag], ipCount[p.ipTag] + ' accounts from one IP');
+      flag(p.uuid, 'shared-ip', ipCount[p.ipTag], ipCount[p.ipTag] + ' accounts from one IP (possible alt accounts)');
+    }
+    if (p.walletTag && walletCount[p.walletTag] >= 2) {
+      flag(p.uuid, 'shared-wallet', walletCount[p.walletTag], walletCount[p.walletTag] + ' accounts on one purse');
     }
   }
 }
@@ -146,28 +174,21 @@ function standings(b) {
     if (p.lastSeen < state.start) continue;
     const excluded = ineligible(p);
     if (!excluded) players++;
-    let from = base.players[p.uuid];
-    const epoch = p.epoch || 0;
-    if (!from) {
-      // Joined after the start: counts from zero (with the profile epoch it had when first seen).
-      from = base.players[p.uuid] = { sbXp: 0, level: 0, tx: 0, txBy: {}, epoch };
-    } else if ((from.epoch || 0) !== epoch) {
-      // The profile was reset (menu Reset Profile / fresh start): the event count restarts with it. The new
-      // start point is the zeroed profile as the plugin captured it right after the reset, so nothing from
-      // before the reset is counted again and the drop never shows as a negative or frozen delta.
-      from = base.players[p.uuid] = { sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: { ...(p.txBy || {}) }, epoch, resetAt: b.at || Date.now() };
-      if (state.reach) delete state.reach[p.uuid];
+    const t = tally(base.players, (state.seen || (state.seen = {})), p, b.at || Date.now());
+    const xp = t.xp;
+    const lv = t.lv;
+    const tx = t.tx;
+    const from = t.from;
+    if (t.resets >= RULES.resetsFlag && !excluded) {
+      flag(p.uuid, 'profile-reset', t.resets, t.resets + ' profile reset(s) during the event (best single profile counts)');
     }
-    const xp = Math.max(0, (p.sbXp || 0) - from.sbXp);
-    const lv = Math.max(0, (p.level || 0) - from.level);
-    const tx = Math.max(0, (p.tx || 0) - from.tx);
     if (xp === 0 && lv === 0 && tx === 0) continue;
     // Tie-break: who reached this XP total first. Stamped with the server snapshot time (every 30 s) the
     // first time the total is seen; it moves only when the total changes.
     const reach = state.reach || (state.reach = {});
     const seen = reach[p.uuid];
     if (!seen || seen.xp !== xp) reach[p.uuid] = { xp, at: b.at || Date.now() };
-    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, excluded, level: p.level || 0, levelGained: lv, xpGained: xp, reachedAt: reach[p.uuid].at, tx, txBy: diffBy(p.txBy, from.txBy) });
+    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, excluded, level: p.level || 0, levelGained: lv, xpGained: xp, reachedAt: reach[p.uuid].at, tx, txBy: diffBy(p.txBy, from.txBy), resets: t.resets, coop: p.coop ? nameOf(p.coop) : null });
   }
   // Ranked by SkyBlock XP gained (1 level = 100 XP, so levels would hide up to 99 XP of difference).
   rows.sort((a, c) => c.xpGained - a.xpGained || a.reachedAt - c.reachedAt || c.tx - a.tx || a.name.localeCompare(c.name));
@@ -175,6 +196,48 @@ function standings(b) {
     at: b.at,
     rows,
     stats: { tx: Math.max(0, (b.tx || 0) - (base.tx || 0)), players, txBy: diffBy(b.txBy, base.txBy) },
+  };
+}
+
+// One event entry per player (uuid). The score is the best single profile's gain, never a sum:
+//  - a profile that existed at the start counts from its start snapshot; a profile made later counts from zero
+//    (so for a player new after the start, the whole new profile counts, which is all event-time progress);
+//  - a reset (menu Reset Profile, co-op join, leave or kick) closes the old profile with its gain up to the last
+//    sample before the reset and starts the new one from its zeroed state; score = max(best closed, current);
+//  - XP uses evXp (own collection part only), so co-op members cannot funnel shared collection XP;
+//  - transactions count once, from the event start (the counter is per player and never resets).
+export function tally(baseline, seen, p, at) {
+  const epoch = p.epoch || 0;
+  let from = baseline[p.uuid];
+  if (!from) {
+    from = baseline[p.uuid] = { xp: 0, sbXp: 0, level: 0, tx: 0, txBy: {}, epoch, bestXp: 0, bestLv: 0, resets: 0 };
+  } else if ((from.epoch || 0) !== epoch) {
+    const last = seen[p.uuid];
+    if (last && (last.epoch || 0) === (from.epoch || 0)) {
+      const g = Math.max(0, last.xp - baseXp(from));
+      const gl = Math.max(0, last.level - (from.level || 0));
+      if (g > (from.bestXp || 0)) {
+        from.bestXp = g;
+        from.bestLv = gl;
+      }
+    }
+    from.resets = (from.resets || 0) + 1;
+    from.xp = scoreOf(p);
+    from.sbXp = p.sbXp || 0;
+    from.level = p.level || 0;
+    from.epoch = epoch;
+    from.resetAt = at;
+  }
+  seen[p.uuid] = { xp: scoreOf(p), level: p.level || 0, epoch };
+  const cur = Math.max(0, scoreOf(p) - baseXp(from));
+  const curLv = Math.max(0, (p.level || 0) - (from.level || 0));
+  const best = from.bestXp || 0;
+  return {
+    from,
+    xp: Math.max(cur, best),
+    lv: cur >= best ? curLv : from.bestLv || 0,
+    tx: Math.max(0, (p.tx || 0) - (from.tx || 0)),
+    resets: from.resets || 0,
   };
 }
 

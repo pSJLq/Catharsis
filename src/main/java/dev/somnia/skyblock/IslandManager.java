@@ -88,6 +88,9 @@ final class IslandManager {
                 freshStart(profile);
                 return;
             }
+            if (plugin.coops() != null && plugin.coops().isGuestMember(profile.uuid)) {
+                return; // the owner's profile looks after the shared island
+            }
             if (profile.layout < LAYOUT) {
                 repaste(profile, false);
                 org.bukkit.entity.Player online = Bukkit.getPlayer(profile.uuid);
@@ -115,9 +118,72 @@ final class IslandManager {
      * makes the next login clear the onchain bag from the player's own purse.
      */
     private void freshStart(Profile p) {
-        if (plugin.minions().countOn(p) > 0) {
-            plugin.getLogger().severe("Fresh start skipped for " + p.uuid + ": minions are placed on the island.");
+        // A co-op member's island is shared: their own data is wiped, the island stays for the others.
+        boolean shared = plugin.coops() != null && plugin.coops().inCoop(p.uuid);
+        int how = wipe(p, true);
+        if (how < 0) {
             return;
+        }
+        boolean onchainReset = how == 1;
+        if (shared) {
+            p.bagCleared = false;
+            p.seenGuide = false;
+            plugin.profiles().save(p);
+        } else {
+            repaste(p, true);
+        }
+        EventTally.profileReset(p);
+        plugin.getLogger().info("Fresh start for " + p.uuid + " (" + p.wallet + "): island " + p.islandX + "," + p.islandZ
+                + (shared ? " kept (co-op island)" : " rebuilt from the starter") + ", " + (onchainReset ? "skills reset onchain (SkySkills2.resetProfile) at next login" : "skills base " + java.util.Arrays.toString(p.skillsBase))
+                + ", bag clears onchain at next login.");
+    }
+
+    /** Joins a co-op: the player's own data is wiped (as a reset) and they move onto the owner's island. */
+    void joinCoop(Profile p, Profile owner) {
+        wipe(p, false);
+        copyIsland(owner, p);
+        p.bagCleared = false;
+        p.seenGuide = false;
+        plugin.profiles().save(p);
+        EventTally.profileReset(p);
+    }
+
+    /** Leaves (or is kicked from) a co-op: wiped again and given a fresh starter island on their old slot. */
+    void leaveCoop(Profile p, int[] home) {
+        wipe(p, false);
+        Profile host = Coops.host(p);
+        boolean useHome = home != null && !(host != p && host.islandX == home[0] && host.islandZ == home[1]);
+        if (useHome) {
+            p.islandX = home[0];
+            p.islandZ = home[1];
+        } else {
+            int index = nextIndex++;
+            plugin.getConfig().set("next-island", nextIndex);
+            plugin.saveConfig();
+            p.islandX = index * SPACING;
+            p.islandZ = 0;
+        }
+        p.islandReady = true;
+        repaste(p, true);
+        EventTally.profileReset(p);
+    }
+
+    /** The island fields a co-op member shares with the owner. */
+    static void copyIsland(Profile from, Profile to) {
+        to.islandX = from.islandX;
+        to.islandZ = from.islandZ;
+        to.islandSpawn = from.islandSpawn == null ? null : from.islandSpawn.clone();
+        to.islandNpc = from.islandNpc == null ? null : from.islandNpc.clone();
+        to.islandPortalDest = from.islandPortalDest;
+        to.layout = from.layout;
+        to.islandReady = true;
+    }
+
+    /** Wipes the player's own progress (not the island). -1 = skipped, 0 = offset reset, 1 = onchain reset queued. */
+    private int wipe(Profile p, boolean checkMinions) {
+        if (checkMinions && plugin.minions().countOn(p) > 0) {
+            plugin.getLogger().severe("Fresh start skipped for " + p.uuid + ": minions are placed on the island.");
+            return -1;
         }
         // SkySkills2: a real onchain reset (resetProfile from the player's purse). Old add-only SkySkills: offset fallback.
         boolean onchainReset = plugin.skillChain() != null && plugin.skillChain().requestReset(p);
@@ -162,11 +228,7 @@ final class IslandManager {
             p.lastWorld = null;
             p.lastPos = null;
         }
-        repaste(p, true);
-        EventTally.profileReset(p);
-        plugin.getLogger().info("Fresh start for " + p.uuid + " (" + p.wallet + "): island " + p.islandX + "," + p.islandZ
-                + " rebuilt from the starter, " + (onchainReset ? "skills reset onchain (SkySkills2.resetProfile) at next login" : "skills base " + java.util.Arrays.toString(p.skillsBase))
-                + ", bag clears onchain at next login.");
+        return onchainReset ? 1 : 0;
     }
 
     /**
@@ -200,6 +262,20 @@ final class IslandManager {
             player.sendMessage(net.kyori.adventure.text.Component.text("You have " + placed + " placed minion(s); the reset cannot run yet.", red));
             return;
         }
+        Coops coops = plugin.coops();
+        if (coops != null && coops.isGuestMember(p.uuid)) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("You are in a co-op. Leave it first (Profile Management ➜ Co-op); leaving resets your profile.", red));
+            return;
+        }
+        if (coops != null && coops.inCoop(p.uuid)) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("Your co-op still has members. Kick them first (/coopkick), then reset.", red));
+            return;
+        }
+        String limit = coops == null ? null : coops.resetLimit(p);
+        if (limit != null) {
+            player.sendMessage(net.kyori.adventure.text.Component.text(limit, red));
+            return;
+        }
         java.util.UUID id = p.uuid;
         String name = player.getName();
         plugin.getLogger().info("Profile reset requested by " + name + " (" + id + ", " + p.wallet + ").");
@@ -211,6 +287,7 @@ final class IslandManager {
                 return;
             }
             Profile fresh = plugin.profiles().get(id);
+            fresh.lastResetAt = System.currentTimeMillis();
             freshStart(fresh);
             plugin.profiles().save(fresh);
             EventTally.profileReset(fresh);
@@ -267,6 +344,9 @@ final class IslandManager {
         profile.seenGuide = false;
         profile.bagCleared = false;
         plugin.profiles().save(profile);
+        if (plugin.coops() != null) {
+            plugin.coops().islandRebuilt(profile); // co-op members follow the owner's new spawn and NPC spots
+        }
     }
 
     private void clearStarter(int ox, int oz) {
@@ -362,6 +442,10 @@ final class IslandManager {
 
     /** Opt-in: /island reset confirm rebuilds the player's island from the current starter (template or generator). */
     boolean reset(org.bukkit.entity.Player player, Profile profile, boolean confirm) {
+        if (plugin.coops() != null && plugin.coops().isGuestMember(profile.uuid)) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("Only " + Coops.name(Coops.host(profile).uuid) + ", the island owner, can rebuild the co-op island.", net.kyori.adventure.text.format.NamedTextColor.RED));
+            return true;
+        }
         if (!profile.islandReady) {
             player.sendMessage(net.kyori.adventure.text.Component.text("You have no island yet. /island makes one.", net.kyori.adventure.text.format.NamedTextColor.RED));
             return true;

@@ -105,6 +105,7 @@ final class ProfileStore {
         profile.questSkip.addAll(yaml.getStringList("quest-skip"));
         profile.questRetired = yaml.getInt("quest-retired");
         profile.resets = yaml.getInt("profile-resets");
+        profile.lastResetAt = yaml.getLong("last-reset-at");
         profile.fishingXp = yaml.getLong("fishing-xp");
         profile.enchantingXp = yaml.getLong("enchanting-xp");
         profile.carpentryXp = yaml.getLong("carpentry-xp");
@@ -201,6 +202,7 @@ final class ProfileStore {
         yaml.set("quest-skip", new ArrayList<>(profile.questSkip));
         yaml.set("quest-retired", profile.questRetired);
         yaml.set("profile-resets", profile.resets);
+        yaml.set("last-reset-at", profile.lastResetAt);
         yaml.set("fishing-xp", profile.fishingXp);
         yaml.set("enchanting-xp", profile.enchantingXp);
         yaml.set("carpentry-xp", profile.carpentryXp);

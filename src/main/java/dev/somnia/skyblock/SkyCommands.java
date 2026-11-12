@@ -246,7 +246,7 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
             player.sendMessage(Component.text("Creative mode does not sign crafts. /gamemode 0 restores the chain inventory.", NamedTextColor.RED));
             return true;
         }
-        long collected = Collects.amount(profile, Collects.ENTRIES.get(cobble ? 3 : 9));
+        long collected = Collects.shared(profile, Collects.ENTRIES.get(cobble ? 3 : 9));
         String name = cobble ? "cobblestone" : "oak";
         if (collected < ProgressMath.CRAFT_COLLECTION) {
             player.sendMessage(Component.text(

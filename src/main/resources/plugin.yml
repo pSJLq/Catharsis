@@ -104,6 +104,27 @@ commands:
     usage: /minion [place]
     aliases: [minions]
 
+  coop:
+    description: Co-op - invite players to share your island and collections
+    usage: /coop [<player>|accept|deny|leave|kick <player>|view|chat <msg>|clear]
+    aliases: [coopview]
+  coopadd:
+    description: Invite a player to your co-op
+    usage: /coopadd <player>
+  coopkick:
+    description: Vote to kick a co-op member
+    usage: /coopkick <player>
+  coopchat:
+    description: Chat with your co-op
+    usage: /coopchat <message>
+    aliases: [cchat, cc]
+  coopclear:
+    description: Clear your pending co-op invites
+    usage: /coopclear
+  coopsalvage:
+    description: Salvage a former member's items (SOON)
+    usage: /coopsalvage
+
 permissions:
   somnia.admin:
     description: /sbadmin (stop, save-off, save-on)

@@ -727,7 +727,7 @@ final class SbMenu implements Listener, CommandExecutor {
         int max = 0;
         int tiers = ProgressMath.tiers().length - 1;
         for (Collects.Entry entry : Collects.ENTRIES) {
-            have += 4 * ProgressMath.tier(Collects.amount(profile, entry));
+            have += 4 * ProgressMath.tier(Collects.shared(profile, entry));
             max += 4 * tiers;
         }
         return new int[]{have, max};
@@ -1014,7 +1014,7 @@ final class SbMenu implements Listener, CommandExecutor {
             if (i >= slots.length) {
                 break;
             }
-            long amount = Collects.amount(profile, entry);
+            long amount = Collects.shared(profile, entry);
             if (amount <= 0) {
                 view.set(slots[i++], icon(Material.GRAY_DYE, plain(entry.name(), NamedTextColor.RED), List.of(
                         plain(cap(entry.category().name()) + " Collection", NamedTextColor.DARK_GRAY),
@@ -1027,6 +1027,15 @@ final class SbMenu implements Listener, CommandExecutor {
             lore.add(plain(cap(entry.category().name()) + " Collection", NamedTextColor.DARK_GRAY));
             lore.add(Component.empty());
             lore.add(plain("Total Collected: ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", amount), NamedTextColor.YELLOW)));
+            List<Profile> group = Coops.group(profile);
+            if (group.size() > 1) {
+                lore.add(Component.empty());
+                lore.add(plain("Co-op Contributions:", NamedTextColor.GRAY));
+                for (Profile member : group) {
+                    lore.add(plain(Coops.name(member.uuid) + ": ", NamedTextColor.AQUA)
+                            .append(plain(String.format(java.util.Locale.ROOT, "%,d", Collects.amount(member, entry)), NamedTextColor.YELLOW)));
+                }
+            }
             if (tier + 1 < tiers.length) {
                 lore.add(plain("Progress to " + entry.name() + " " + ProgressMath.roman(tier + 1) + ": ", NamedTextColor.GRAY)
                         .append(plain(percent(amount, tiers[tier + 1]), NamedTextColor.YELLOW)));
@@ -1227,7 +1236,13 @@ final class SbMenu implements Listener, CommandExecutor {
         view.set(13, icon(Material.NAME_TAG, plain("Your Profile", NamedTextColor.GREEN), List.of(
                 plain("Purse ", NamedTextColor.GRAY).append(plain(WalletService.shortAddress(profile.wallet), NamedTextColor.AQUA)),
                 plain("SkyBlock Level ", NamedTextColor.GRAY).append(plain(String.valueOf(Skills.skyblockLevel(profile)), Skills.levelColor(Skills.skyblockLevel(profile)))),
-                plain("Coins ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", profile.coins), NamedTextColor.GOLD)))), null);
+                plain("Coins ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", profile.coins), NamedTextColor.GOLD)),
+                plain("Profile ", NamedTextColor.GRAY).append(coopLabel(profile)))), null);
+        view.set(31, icon(Material.PLAYER_HEAD, plain("Co-op", NamedTextColor.GREEN), List.of(
+                plain("Play together on one island with", NamedTextColor.GRAY), plain("shared collections (up to " + Coops.MAX_MEMBERS + ").", NamedTextColor.GRAY),
+                plain("Skills, purse and bag stay yours.", NamedTextColor.GRAY), Component.empty(),
+                plain("Members: ", NamedTextColor.GRAY).append(plain(Coops.group(profile).size() + "/" + Coops.MAX_MEMBERS, NamedTextColor.YELLOW)),
+                Component.empty(), click("Click to manage!"))), c -> openCoop(player));
         view.set(29, icon(Material.GOLD_INGOT, plain("Deposit Info", NamedTextColor.GOLD), List.of(
                 plain("Your purse address and the", NamedTextColor.GRAY), plain("faucet for STT gas.", NamedTextColor.GRAY),
                 Component.empty(), click("Click to show!"))), c -> { player.closeInventory(); player.performCommand("deposit"); });
@@ -1238,6 +1253,174 @@ final class SbMenu implements Listener, CommandExecutor {
                 plain("Your event leaderboard count", NamedTextColor.GRAY), plain("starts again from zero.", NamedTextColor.GRAY),
                 Component.empty(), plain("Click to continue!", NamedTextColor.RED))), c -> openResetConfirm(player));
         footer(view, player, () -> openMain(player));
+        player.openInventory(view.inventory);
+    }
+
+    private Component coopLabel(Profile profile) {
+        int n = Coops.group(profile).size();
+        return n > 1 ? plain("Co-op (" + n + "/" + Coops.MAX_MEMBERS + ")", NamedTextColor.AQUA) : plain("Solo", NamedTextColor.GREEN);
+    }
+
+    // ------------------------------------------------------------------ co-op
+    void openCoop(Player player) {
+        Coops coops = plugin.coops();
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        Coops.Coop coop = coops.of(player.getUniqueId());
+        boolean in = coop != null && coop.size() > 1;
+        boolean owner = !in || coop.owner.equals(player.getUniqueId());
+        View view = page("Co-op Management");
+        List<Component> head = new ArrayList<>();
+        head.add(plain("Profile ", NamedTextColor.GRAY).append(coopLabel(profile)));
+        head.add(Component.empty());
+        head.add(plain("Shared: island, collections", NamedTextColor.GRAY));
+        head.add(plain("(each member's part is shown).", NamedTextColor.GRAY));
+        head.add(plain("Your own: skills, purse, bag,", NamedTextColor.GRAY));
+        head.add(plain("quests, coins and trades.", NamedTextColor.GRAY));
+        head.add(Component.empty());
+        head.add(plain("Co-op chat: /cc <message>", NamedTextColor.DARK_GRAY));
+        view.set(4, icon(Material.PLAYER_HEAD, plain("Co-op", NamedTextColor.GREEN), head), null);
+        List<java.util.UUID> members = in ? coop.all() : List.of(player.getUniqueId());
+        int[] slots = {20, 21, 22, 23, 24};
+        for (int i = 0; i < members.size() && i < slots.length; i++) {
+            java.util.UUID id = members.get(i);
+            Profile mp = plugin.profiles().get(id);
+            boolean online = org.bukkit.Bukkit.getPlayer(id) != null;
+            boolean isOwner = !in || coop.owner.equals(id);
+            List<Component> lore = new ArrayList<>();
+            lore.add(plain(isOwner ? "Island Owner" : "Co-op Member", isOwner ? NamedTextColor.GOLD : NamedTextColor.AQUA));
+            lore.add(plain("SkyBlock Level ", NamedTextColor.GRAY).append(plain(String.valueOf(Skills.skyblockLevel(mp)), Skills.levelColor(Skills.skyblockLevel(mp)))));
+            lore.add(online ? plain("Online", NamedTextColor.GREEN) : plain("Last seen " + ago(org.bukkit.Bukkit.getOfflinePlayer(id).getLastSeen()), NamedTextColor.GRAY));
+            Consumer<ClickType> action = null;
+            if (in && !id.equals(player.getUniqueId()) && !isOwner) {
+                int votes = coops.votesFor(coop.owner, id);
+                lore.add(Component.empty());
+                if (coop.size() == 2) {
+                    lore.add(plain("Kickable after 7 days offline.", NamedTextColor.DARK_GRAY));
+                } else {
+                    lore.add(plain("Kick votes: " + votes + "/" + Coops.needed(coop.size()), NamedTextColor.DARK_GRAY));
+                }
+                lore.add(plain("Click to vote kick!", NamedTextColor.RED));
+                action = c -> openCoopKick(player, id);
+            }
+            view.set(slots[i], icon(Material.PLAYER_HEAD, plain(Coops.name(id), online ? NamedTextColor.GREEN : NamedTextColor.GRAY), lore), action);
+        }
+        if (owner && members.size() < Coops.MAX_MEMBERS) {
+            view.set(38, icon(Material.WRITABLE_BOOK, plain("Invite a Player", NamedTextColor.GREEN), List.of(
+                    plain("Type /coop <player>.", NamedTextColor.GRAY), plain("They must be online; joining", NamedTextColor.GRAY),
+                    plain("resets their own profile.", NamedTextColor.GRAY), Component.empty(),
+                    plain("Invites last 5 minutes.", NamedTextColor.DARK_GRAY))), null);
+        }
+        java.util.Map<java.util.UUID, Long> mine = coops.invitesFor(player.getUniqueId());
+        if (!mine.isEmpty()) {
+            java.util.UUID from = mine.keySet().iterator().next();
+            List<Component> lore = new ArrayList<>();
+            for (java.util.UUID id : mine.keySet()) {
+                lore.add(plain("From " + Coops.name(id), NamedTextColor.YELLOW));
+            }
+            lore.add(Component.empty());
+            lore.add(click("Click to see " + Coops.name(from) + "'s!"));
+            view.set(40, icon(Material.PAPER, plain("Co-op Invites (" + mine.size() + ")", NamedTextColor.AQUA), lore), c -> openCoopJoin(player, from));
+        }
+        if (in && !owner) {
+            view.set(42, icon(Material.OAK_DOOR, plain("Leave Co-op", NamedTextColor.RED), List.of(
+                    plain("Leave this island. Your profile", NamedTextColor.GRAY), plain("is reset onto a new starter", NamedTextColor.GRAY),
+                    plain("island.", NamedTextColor.GRAY), Component.empty(), plain("Click to continue!", NamedTextColor.RED))), c -> openCoopLeave(player));
+        }
+        if (in) {
+            List<Component> hist = new ArrayList<>();
+            int from = Math.max(0, coop.history.size() - 8);
+            for (String h : coop.history.subList(from, coop.history.size())) {
+                String[] parts = h.split(" ", 3);
+                if (parts.length == 3) {
+                    hist.add(plain(parts[2] + " " + parts[1] + " (" + ago(Long.parseLong(parts[0])) + ")", NamedTextColor.GRAY));
+                }
+            }
+            if (hist.isEmpty()) {
+                hist.add(plain("Nobody yet.", NamedTextColor.GRAY));
+            }
+            view.set(46, icon(Material.BOOK, plain("Historical Members", NamedTextColor.GREEN), hist), null);
+        }
+        view.set(52, soon(Material.CHEST, "Co-op Salvage", "Claim a former member's items."), null);
+        footer(view, player, () -> openProfile(player));
+        player.openInventory(view.inventory);
+    }
+
+    private static String ago(long at) {
+        if (at <= 0) {
+            return "a while ago";
+        }
+        long m = Math.max(0, (System.currentTimeMillis() - at) / 60_000L);
+        if (m < 60) {
+            return m + "m ago";
+        }
+        if (m < 48 * 60) {
+            return (m / 60) + "h ago";
+        }
+        return (m / 1440) + "d ago";
+    }
+
+    void openCoopJoin(Player player, java.util.UUID ownerId) {
+        View view = page("Join Co-op?");
+        String owner = Coops.name(ownerId);
+        List<Component> warn = new ArrayList<>();
+        warn.add(plain("Joining resets your profile.", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
+        warn.add(Component.empty());
+        warn.add(plain("Wiped: skills, collections, quests,", NamedTextColor.GRAY));
+        warn.add(plain("coins, discovered areas and every", NamedTextColor.GRAY));
+        warn.add(plain("item in your bag and ender chest.", NamedTextColor.GRAY));
+        warn.add(plain("Your own island is left behind.", NamedTextColor.GRAY));
+        warn.add(plain("Onchain: your skills reset and the", NamedTextColor.GRAY));
+        warn.add(plain("bag clears from your purse (gas).", NamedTextColor.GRAY));
+        warn.add(Component.empty());
+        warn.add(plain("Then you play on " + owner + "'s island", NamedTextColor.AQUA));
+        warn.add(plain("and share its collections.", NamedTextColor.AQUA));
+        warn.add(plain("Kept: your purse, its STT and key.", NamedTextColor.GREEN));
+        warn.add(plain("Event leaderboard: your count", NamedTextColor.GRAY));
+        warn.add(plain("starts again for the new profile.", NamedTextColor.GRAY));
+        warn.add(plain("You are disconnected; join again.", NamedTextColor.GRAY));
+        view.set(13, icon(Material.PLAYER_HEAD, plain("Join " + owner + "'s co-op?", NamedTextColor.YELLOW), warn), null);
+        view.set(30, icon(Material.LIME_TERRACOTTA, plain("Yes, reset and join", NamedTextColor.GREEN).decoration(TextDecoration.BOLD, true), List.of(
+                plain("Resets this profile now.", NamedTextColor.GRAY), Component.empty(), plain("Click to join!", NamedTextColor.GREEN))),
+                c -> { player.closeInventory(); plugin.coops().join(player, ownerId); });
+        view.set(32, icon(Material.RED_TERRACOTTA, plain("No, keep my profile", NamedTextColor.RED), List.of(
+                plain("Nothing changes.", NamedTextColor.GRAY), Component.empty(), click("Click to go back!"))), c -> openCoop(player));
+        footer(view, player, () -> openCoop(player));
+        player.openInventory(view.inventory);
+    }
+
+    void openCoopLeave(Player player) {
+        View view = page("Leave Co-op?");
+        List<Component> warn = new ArrayList<>();
+        warn.add(plain("Leaving resets your profile.", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
+        warn.add(Component.empty());
+        warn.add(plain("Your skills, collection part, quests,", NamedTextColor.GRAY));
+        warn.add(plain("coins and bag are wiped; you start", NamedTextColor.GRAY));
+        warn.add(plain("on a new starter island. The co-op", NamedTextColor.GRAY));
+        warn.add(plain("island stays with the others.", NamedTextColor.GRAY));
+        warn.add(Component.empty());
+        warn.add(plain("Kept: your purse, its STT and key.", NamedTextColor.GREEN));
+        warn.add(plain("You are disconnected; join again.", NamedTextColor.GRAY));
+        view.set(13, icon(Material.OAK_DOOR, plain("Leave the co-op?", NamedTextColor.RED), warn), null);
+        view.set(30, icon(Material.RED_TERRACOTTA, plain("Yes, leave and reset", NamedTextColor.RED).decoration(TextDecoration.BOLD, true), List.of(
+                plain("Leaves the co-op now.", NamedTextColor.GRAY), Component.empty(), plain("Click to leave!", NamedTextColor.RED))),
+                c -> { player.closeInventory(); plugin.coops().leave(player); });
+        view.set(32, icon(Material.LIME_TERRACOTTA, plain("No, stay", NamedTextColor.GREEN), List.of(
+                plain("Nothing changes.", NamedTextColor.GRAY), Component.empty(), click("Click to go back!"))), c -> openCoop(player));
+        footer(view, player, () -> openCoop(player));
+        player.openInventory(view.inventory);
+    }
+
+    private void openCoopKick(Player player, java.util.UUID target) {
+        View view = page("Kick from Co-op?");
+        String name = Coops.name(target);
+        view.set(13, icon(Material.PLAYER_HEAD, plain("Vote to kick " + name + "?", NamedTextColor.RED), List.of(
+                plain("A kicked member's profile is reset", NamedTextColor.GRAY), plain("onto a new starter island.", NamedTextColor.GRAY), Component.empty(),
+                plain("3+ members: more than half of the", NamedTextColor.GRAY), plain("others must vote within 5 minutes.", NamedTextColor.GRAY),
+                plain("2 members: only after 7 days offline.", NamedTextColor.GRAY))), null);
+        view.set(30, icon(Material.RED_TERRACOTTA, plain("Yes, vote kick", NamedTextColor.RED).decoration(TextDecoration.BOLD, true), List.of(click("Click to vote!"))),
+                c -> { player.closeInventory(); plugin.coops().kick(player, name); });
+        view.set(32, icon(Material.LIME_TERRACOTTA, plain("No", NamedTextColor.GREEN), List.of(click("Click to go back!"))), c -> openCoop(player));
+        footer(view, player, () -> openCoop(player));
         player.openInventory(view.inventory);
     }
 

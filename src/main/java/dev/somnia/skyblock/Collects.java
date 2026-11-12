@@ -86,7 +86,10 @@ final class Collects {
         return null;
     }
 
-    /** Island cobble/oak/wheat come from the chain-backed counters, everything else from the profile map. */
+    /**
+     * This player's own collection count (what SkySkills holds for their address). Island cobble/oak/wheat come
+     * from the chain-backed counters, everything else from the profile map.
+     */
     static long amount(Profile p, Entry e) {
         long extra = p.collections.getOrDefault(e.key(), 0L);
         return switch (e.key()) {
@@ -95,6 +98,22 @@ final class Collects {
             case "wheat" -> p.wheat + extra;
             default -> extra;
         };
+    }
+
+    /**
+     * The collection as the player sees it: in a co-op every member's own count added up (Hypixel: collections are
+     * shared, each member's contribution is shown). Solo it is the player's own count.
+     */
+    static long shared(Profile p, Entry e) {
+        List<Profile> group = Coops.group(p);
+        if (group.size() < 2) {
+            return amount(p, e);
+        }
+        long sum = 0;
+        for (Profile m : group) {
+            sum += amount(m, e);
+        }
+        return sum;
     }
 
     /** Island counters mirrored from SkyIsland (cobble/oak/wheat), part of the SkySkills collection total. */
@@ -110,7 +129,7 @@ final class Collects {
     static int unlocked(Profile p) {
         int n = 0;
         for (Entry e : ENTRIES) {
-            if (amount(p, e) > 0) {
+            if (shared(p, e) > 0) {
                 n++;
             }
         }
@@ -124,10 +143,10 @@ final class Collects {
             return;
         }
         Profile p = plugin.profiles().get(player.getUniqueId());
-        long before = amount(p, e);
+        long before = shared(p, e);
         p.collections.merge(e.key(), amount, Long::sum);
         plugin.skillChain().queueCollection(p, e, amount);
-        announce(player, p, e, before, amount(p, e));
+        announce(player, p, e, before, shared(p, e));
         plugin.stats().markDirty(player);
     }
 

@@ -56,6 +56,8 @@ final class Profile {
     int questRetired;
     /** Full profile resets so far (menu "Reset Profile" or the admin fresh start); the website leaderboard restarts its count when it changes. */
     int resets;
+    /** When the player last reset this profile themselves (menu reset, co-op join or leave); limits resets during an event. */
+    long lastResetAt;
     long fishingXp;
     /** Leftover tenths of skill XP per Skills.Skill ordinal (pumpkin +4.5); never sent onchain until they add up to 1. */
     final int[] xpTenths = new int[7];
