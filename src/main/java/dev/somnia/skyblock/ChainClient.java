@@ -31,6 +31,9 @@ final class ChainClient {
         if (!enabled || profile.wallet == null || profile.wallet.isBlank()) {
             return;
         }
+        if (!sending.add(profile.uuid)) {
+            return; // a mint for this profile is already in flight
+        }
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 BigInteger existing = plugin.wallets().memberIsland(profile.wallet);
@@ -39,6 +42,9 @@ final class ChainClient {
                 }
                 String hash = plugin.wallets().createIsland(profile);
                 plugin.getLogger().info("Island deed for " + profile.wallet + " " + hash);
+                if (plugin.deeds() != null) {
+                    plugin.deeds().minted(profile.uuid);
+                }
             } catch (Exception exception) {
                 String why = String.valueOf(exception.getMessage());
                 if (why.startsWith("Purse has")) {
@@ -46,6 +52,8 @@ final class ChainClient {
                 } else {
                     plugin.getLogger().warning("Could not create the island deed: " + why);
                 }
+            } finally {
+                sending.remove(profile.uuid);
             }
         });
     }

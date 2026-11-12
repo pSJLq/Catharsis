@@ -349,12 +349,12 @@ final class WalletService {
         return sendData(profile, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
-    /** SkyIsland3.ownerOf(deed), or null when the deed does not exist. */
+    /** SkyIsland4.holderOf(deed) (ownerOf without the ERC-721 revert), or null when the deed does not exist. */
     String islandOwner(BigInteger deed) throws IOException {
         if (deed == null || deed.signum() <= 0) {
             return null;
         }
-        Function function = new Function("ownerOf", List.of(new Uint256(deed)), List.of(new TypeReference<Address>() {
+        Function function = new Function("holderOf", List.of(new Uint256(deed)), List.of(new TypeReference<Address>() {
         }));
         String raw = call("0x0000000000000000000000000000000000000000", contract(), function);
         if (raw == null || raw.equals("0x")) {
@@ -369,31 +369,31 @@ final class WalletService {
         return owner.equalsIgnoreCase("0x0000000000000000000000000000000000000000") ? null : owner;
     }
 
-    /** SkyIsland3.invite(member) from the island owner's purse (attested; the owner pays the gas). */
+    /** SkyIsland4.invite(member) from the island owner's purse (attested; the owner pays the gas). */
     String inviteToIsland(Profile owner, String member) throws Exception {
         Function function = new Function("invite", List.of(new Address(member)), Collections.emptyList());
         return sendData(owner, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
-    /** SkyIsland3.accept(deed) from the joiner's purse (attested; the joiner pays). Burns the joiner's solo deed. */
+    /** SkyIsland4.accept(deed) from the joiner's purse (attested; the joiner pays). Burns the joiner's solo deed. */
     String acceptIsland(Profile joiner, BigInteger deed) throws Exception {
         Function function = new Function("accept", List.of(new Uint256(deed)), Collections.emptyList());
         return sendData(joiner, contract(), FunctionEncoder.encode(function), 12_000_000L);
     }
 
-    /** SkyIsland3.leave() from the leaving member's purse (attested; the member pays). */
+    /** SkyIsland4.leave() from the leaving member's purse (attested; the member pays). */
     String leaveIsland(Profile member) throws Exception {
         Function function = new Function("leave", Collections.emptyList(), Collections.emptyList());
         return sendData(member, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
-    /** SkyIsland3.kick(member) from the purse of the co-op member who completed the kick (attested). */
+    /** SkyIsland4.kick(member) from the purse of the co-op member who completed the kick (attested). */
     String kickFromIsland(Profile by, String member) throws Exception {
         Function function = new Function("kick", List.of(new Address(member)), Collections.emptyList());
         return sendData(by, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
-    /** SkyIsland3.coopOf(deed): the deed owner first, then the co-op members. Empty when the deed does not exist. */
+    /** SkyIsland4.coopOf(deed): the deed owner first, then the co-op members. Empty when the deed does not exist. */
     List<String> islandCoop(BigInteger deed) throws IOException {
         List<String> out = new ArrayList<>();
         if (deed == null || deed.signum() <= 0) {
@@ -421,7 +421,7 @@ final class WalletService {
         return out;
     }
 
-    /** SkyIsland3.inviteOf(deed, member): seconds-since-epoch expiry of a live invite from the current owner, else 0. */
+    /** SkyIsland4.inviteOf(deed, member): seconds-since-epoch expiry of a live invite from the current owner, else 0. */
     long islandInviteUntil(BigInteger deed, String member) throws IOException {
         Function function = new Function("inviteOf", List.of(new Uint256(deed), new Address(member)), List.of(new TypeReference<Address>() {
         }, new TypeReference<org.web3j.abi.datatypes.generated.Uint64>() {
@@ -442,6 +442,70 @@ final class WalletService {
     }
 
 
+
+    /** SkyIsland4.nextId(): deeds 1 .. nextId-1 have been minted (some may be burned). */
+    long islandNextId() throws IOException {
+        Function function = new Function("nextId", Collections.emptyList(), List.of(new TypeReference<Uint256>() {
+        }));
+        @SuppressWarnings("rawtypes")
+        List<Type> decoded = FunctionReturnDecoder.decode(call("0x0000000000000000000000000000000000000000", contract(), function), function.getOutputParameters());
+        return decoded.isEmpty() ? 1 : ((BigInteger) decoded.get(0).getValue()).longValue();
+    }
+
+    /** SkyIsland4.sales(deed): seller, end (s), kind (1 BIN, 2 auction), price, bid, bidder. Null when not listed. */
+    IslandDeeds.Sale islandSale(long deed) throws IOException {
+        Function function = new Function("sales", List.of(new Uint256(BigInteger.valueOf(deed))), List.of(
+                new TypeReference<Address>() {
+                }, new TypeReference<org.web3j.abi.datatypes.generated.Uint64>() {
+                }, new TypeReference<Uint8>() {
+                }, new TypeReference<org.web3j.abi.datatypes.generated.Uint128>() {
+                }, new TypeReference<org.web3j.abi.datatypes.generated.Uint128>() {
+                }, new TypeReference<Address>() {
+                }));
+        @SuppressWarnings("rawtypes")
+        List<Type> d = FunctionReturnDecoder.decode(call("0x0000000000000000000000000000000000000000", contract(), function), function.getOutputParameters());
+        if (d.size() < 6) {
+            return null;
+        }
+        String seller = d.get(0).getValue().toString();
+        if (seller.equalsIgnoreCase("0x0000000000000000000000000000000000000000")) {
+            return null;
+        }
+        String bidder = d.get(5).getValue().toString();
+        return new IslandDeeds.Sale(deed, seller, ((BigInteger) d.get(1).getValue()).longValue() * 1000L,
+                ((BigInteger) d.get(2).getValue()).intValue(), (BigInteger) d.get(3).getValue(), (BigInteger) d.get(4).getValue(),
+                bidder.equalsIgnoreCase("0x0000000000000000000000000000000000000000") ? null : bidder);
+    }
+
+    /** SkyIsland4.pending(player): outbid refunds and failed payouts waiting for withdrawPending(). */
+    BigInteger islandPending(String player) throws IOException {
+        Function function = new Function("pending", List.of(new Address(player)), List.of(new TypeReference<Uint256>() {
+        }));
+        @SuppressWarnings("rawtypes")
+        List<Type> decoded = FunctionReturnDecoder.decode(call("0x0000000000000000000000000000000000000000", contract(), function), function.getOutputParameters());
+        return decoded.isEmpty() ? BigInteger.ZERO : (BigInteger) decoded.get(0).getValue();
+    }
+
+    BigInteger blockNumber() throws IOException {
+        return web3.ethBlockNumber().send().getBlockNumber();
+    }
+
+    /** Every SkyIsland4 log in [from, to] (inclusive). */
+    List<org.web3j.protocol.core.methods.response.Log> islandLogs(BigInteger from, BigInteger to) throws IOException {
+        org.web3j.protocol.core.methods.request.EthFilter filter = new org.web3j.protocol.core.methods.request.EthFilter(
+                org.web3j.protocol.core.DefaultBlockParameter.valueOf(from), org.web3j.protocol.core.DefaultBlockParameter.valueOf(to), contract());
+        org.web3j.protocol.core.methods.response.EthLog result = web3.ethGetLogs(filter).send();
+        if (result.hasError()) {
+            throw new IOException(trim(result.getError().getMessage()));
+        }
+        List<org.web3j.protocol.core.methods.response.Log> out = new ArrayList<>();
+        for (org.web3j.protocol.core.methods.response.EthLog.LogResult<?> r : result.getLogs()) {
+            if (r.get() instanceof org.web3j.protocol.core.methods.response.Log log) {
+                out.add(log);
+            }
+        }
+        return out;
+    }
 
     BigInteger[] wordsOf(String player) throws IOException {
         Function function = new Function("wordsOf", List.of(new Address(player)), Collections.emptyList());

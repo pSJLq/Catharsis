@@ -477,6 +477,11 @@ final class MarketGui implements Listener {
                         create(player);
                     }
                 });
+        if (plugin.deeds() != null && plugin.deeds().enabled()) {
+            view.set(24, icon(Material.GRASS_BLOCK, "Island Market", NamedTextColor.GREEN, List.of(
+                    "Buy and sell whole islands.", "Island deeds are NFTs (SkyIsland4).", "", "!Click to open!")),
+                    c -> plugin.deeds().market(player));
+        }
         view.set(22, icon(Material.OAK_SIGN, "Fees (STT sink)", NamedTextColor.GOLD, List.of(
                 "BIN (SkyBin): 1% listing fee + 2% tax.",
                 "  Half of every BIN fee is burned,",

@@ -271,6 +271,10 @@ final class IslandManager {
             player.sendMessage(net.kyori.adventure.text.Component.text("Your co-op still has members. Kick them first (/coopkick), then reset.", red));
             return;
         }
+        if (plugin.deeds() != null && plugin.deeds().listedActive(p) != null) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("Your island is listed in the Island Market. Cancel the listing first (Auction House ➜ Island Market ➜ Your Deeds), then reset.", red));
+            return;
+        }
         String limit = coops == null ? null : coops.resetLimit(p);
         if (limit != null) {
             player.sendMessage(net.kyori.adventure.text.Component.text(limit, red));
@@ -346,6 +350,9 @@ final class IslandManager {
         plugin.profiles().save(profile);
         if (plugin.coops() != null) {
             plugin.coops().islandRebuilt(profile); // co-op members follow the owner's new spawn and NPC spots
+        }
+        if (plugin.deeds() != null) {
+            plugin.deeds().refreshSlot(profile); // the deed's slot record follows the new spawn and NPC spots
         }
     }
 

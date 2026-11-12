@@ -10,8 +10,8 @@ chain:
   chain-id: 50312
   old-realm-contract: "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d"
   keys-contract: "0x75B33d1FFd2cb793Cca8280B8E80762339927B3b"
-  profile-contract: "0xeeEA12518a25852242E7841cf8436141e57475Cf"
-  old-profile-contract: "0xaCced5efB1762DfAF2587723c9dC07256fa4eb60"
+  profile-contract: "0x90B0ef21906e335d9A1FeBeb206F159E41b8B089"
+  old-profile-contract: "0xeeEA12518a25852242E7841cf8436141e57475Cf"
   hold-contract: "0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f"
   gear-contract: "0x67e01A054Dbe23d45695F737a77768d4a842c4b0"
   word-contract: "0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405"

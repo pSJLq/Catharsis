@@ -47,6 +47,17 @@ const islandIface = new ethers.Interface([
   'function leave()',
   'function kick(address member)',
   'function transferFrom(address from, address to, uint256 id)',
+  'function safeTransferFrom(address from, address to, uint256 id)',
+  'function safeTransferFrom(address from, address to, uint256 id, bytes data)',
+  'function approve(address to, uint256 id)',
+  'function setApprovalForAll(address operator, bool approved)',
+  'function useIsland(uint256 id)',
+  'function listIsland(uint256 id, uint8 kind, uint128 price, uint32 duration)',
+  'function buyIsland(uint256 id)',
+  'function bidIsland(uint256 id)',
+  'function settleIsland(uint256 id)',
+  'function cancelIslandSale(uint256 id)',
+  'function withdrawPending()',
   'function applyBatch(uint32 cobble, uint32 oak, uint32 wheat)',
   'function craft(uint8 kind)',
   'event Transfer(address indexed from, address indexed to, uint256 indexed id)',
@@ -55,6 +66,11 @@ const islandIface = new ethers.Interface([
   'event Joined(uint256 indexed id, address indexed member, uint256 released)',
   'event Left(uint256 indexed id, address indexed member)',
   'event Kicked(uint256 indexed id, address indexed member, address indexed by)',
+  'event IslandActive(address indexed player, uint256 indexed id)',
+  'event IslandListed(uint256 indexed id, address indexed seller, uint8 kind, uint256 price, uint64 end, uint256 fee)',
+  'event IslandBid(uint256 indexed id, address indexed bidder, uint256 amount, uint64 end)',
+  'event IslandSold(uint256 indexed id, address indexed buyer, address indexed seller, uint256 paid, uint256 tax)',
+  'event IslandSaleClosed(uint256 indexed id, address indexed seller)',
   'event Batch(address indexed player, uint32 cobble, uint32 oak, uint32 wheat)',
   'event Craft(address indexed player, uint8 kind)',
 ]);
@@ -650,7 +666,7 @@ async function serveIcon(res, name) {
 const SHANNON = 'https://shannon-explorer.somnia.network';
 const WATCH = [chain.island, chain.hold, chain.gear, chain.word, chain.aotv].filter(Boolean).map((address) => ethers.getAddress(address));
 const CONTRACTS = [
-  { name: 'Island', address: ethers.getAddress(chain.island), role: 'Island deeds and co-op' },
+  { name: 'Island', address: ethers.getAddress(chain.island), role: 'Island deeds (ERC-721), co-op and the Island Market' },
   { name: 'Hold', address: HOLD_PRETTY, role: 'Bags and chests' },
   { name: 'Gear', address: GEAR_PRETTY, role: 'Tool traits' },
   { name: 'Word', address: WORD, role: 'Spell words' },
@@ -754,7 +770,23 @@ function describeLog(address, parsed, row) {
     } else if (name === 'Transfer') {
       rememberPlayer(row, parsed.args.from);
       rememberPlayer(row, parsed.args.to);
-      addBit(row, 'Island ' + parsed.args.id.toString() + ' moved');
+      const id = parsed.args.id.toString();
+      if (parsed.args.from === ethers.ZeroAddress) addBit(row, 'Island deed ' + id + ' minted');
+      else if (parsed.args.to === ethers.ZeroAddress) addBit(row, 'Island deed ' + id + ' given up');
+      else addBit(row, 'Island deed ' + id + ' moved to ' + shortAddr(parsed.args.to));
+    } else if (name === 'IslandListed') {
+      rememberPlayer(row, parsed.args.seller);
+      addBit(row, 'Island ' + parsed.args.id.toString() + (Number(parsed.args.kind) === 1 ? ' listed for ' : ' up for auction from ') + ethers.formatEther(parsed.args.price) + ' STT');
+    } else if (name === 'IslandBid') {
+      rememberPlayer(row, parsed.args.bidder);
+      addBit(row, 'Bid ' + ethers.formatEther(parsed.args.amount) + ' STT on island ' + parsed.args.id.toString());
+    } else if (name === 'IslandSold') {
+      rememberPlayer(row, parsed.args.buyer);
+      rememberPlayer(row, parsed.args.seller);
+      addBit(row, 'Island ' + parsed.args.id.toString() + ' sold to ' + shortAddr(parsed.args.buyer));
+    } else if (name === 'IslandSaleClosed') {
+      rememberPlayer(row, parsed.args.seller);
+      addBit(row, 'Island ' + parsed.args.id.toString() + ' no longer for sale');
     }
     return;
   }
@@ -962,9 +994,115 @@ function sendJson(res, status, data) {
 const isMain = process.argv[1]
   && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
+// ---- island deed metadata (SkyIsland4 tokenURI = <site>/api/island/<id>) ----------------------------------
+const deedIface = new ethers.Interface([
+  'function holderOf(uint256 id) view returns (address)',
+  'function coopOf(uint256 id) view returns (address owner, address[] members)',
+  'function sales(uint256 id) view returns (address seller, uint64 end, uint8 kind, uint128 price, uint128 bid, address bidder)',
+  'function memberIsland(address player) view returns (uint256)',
+]);
+const deedCache = new Map(); // id -> { at, data }
+
+async function deedInfo(id) {
+  const hit = deedCache.get(id);
+  if (hit && Date.now() - hit.at < 30000) return hit.data;
+  const c = new ethers.Contract(chain.island, deedIface, provider);
+  const holder = await c.holderOf(id);
+  let data = null;
+  if (holder !== ethers.ZeroAddress) {
+    const [coop, sale, active] = await Promise.all([c.coopOf(id), c.sales(id), c.memberIsland(holder)]);
+    data = {
+      holder,
+      members: coop.members.length,
+      active: active === BigInt(id),
+      sale: sale.seller === ethers.ZeroAddress ? null : {
+        kind: Number(sale.kind) === 1 ? 'Buy It Now' : 'Auction',
+        price: ethers.formatEther(sale.bid > 0n ? sale.bid : sale.price),
+        end: Number(sale.end),
+      },
+    };
+  }
+  deedCache.set(id, { at: Date.now(), data });
+  return data;
+}
+
+function siteOrigin(req) {
+  const host = String(req.headers.host || '127.0.0.1:8791').replace(/[^A-Za-z0-9.:\-\[\]]/g, '');
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() === 'https' ? 'https' : 'http';
+  return proto + '://' + host;
+}
+
+function deedSvg(id) {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" width="320" height="320">'
+    + '<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7ec8f5"/><stop offset="1" stop-color="#d9f1ff"/></linearGradient></defs>'
+    + '<rect width="320" height="320" fill="url(#s)"/>'
+    + '<polygon points="70,170 250,170 215,240 105,240" fill="#7a5230"/>'
+    + '<polygon points="105,240 215,240 185,280 135,280" fill="#5b3b22"/>'
+    + '<rect x="70" y="150" width="180" height="22" fill="#5fae3a"/>'
+    + '<rect x="150" y="90" width="12" height="60" fill="#6b4a2b"/>'
+    + '<rect x="122" y="58" width="68" height="44" fill="#3f8f2f"/>'
+    + '<text x="160" y="42" font-family="monospace" font-size="22" text-anchor="middle" fill="#0d2a3d">CATHARSIS ISLAND</text>'
+    + '<text x="160" y="310" font-family="monospace" font-size="26" text-anchor="middle" fill="#0d2a3d">#' + id + '</text>'
+    + '</svg>';
+}
+
+async function handleDeed(req, res, route) {
+  const m = route.match(/^\/api\/island\/([0-9]{1,12})(\.json|\.svg)?$/);
+  if (!m) return false;
+  const id = Number(m[1]);
+  if (!Number.isSafeInteger(id) || id < 1) {
+    sendJson(res, 404, { error: 'No island deed with that number.' });
+    return true;
+  }
+  let info;
+  try {
+    info = await deedInfo(id);
+  } catch (error) {
+    console.error('deed', error.message);
+    sendJson(res, 502, { error: 'Shannon did not answer. Try again in a moment.' });
+    return true;
+  }
+  if (!info) {
+    sendJson(res, 404, { error: 'No island deed with that number.' });
+    return true;
+  }
+  if (m[2] === '.svg') {
+    const body = Buffer.from(deedSvg(id));
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600', 'Content-Length': body.length });
+    res.end(body);
+    return true;
+  }
+  const origin = siteOrigin(req);
+  const attributes = [
+    { trait_type: 'Island', display_type: 'number', value: id },
+    { trait_type: 'Co-op members', display_type: 'number', value: info.members },
+    { trait_type: 'Played on by the holder', value: info.active ? 'Yes' : 'No (held)' },
+    { trait_type: 'For sale', value: info.sale ? info.sale.kind : 'No' },
+  ];
+  if (info.sale) attributes.push({ trait_type: 'Price (STT)', value: info.sale.price });
+  const body = Buffer.from(JSON.stringify({
+    name: 'Catharsis Island #' + id,
+    description: 'An island deed in Catharsis, a SkyBlock world on Somnia. The holder plays on the island with up to 4 co-op members. '
+      + 'An island without co-op members can be sold in the in-game Island Market (Buy It Now or bids) or sent like any NFT; '
+      + 'the new holder gets the island when they log in.',
+    image: origin + '/api/island/' + id + '.svg',
+    external_url: origin + '/explore',
+    attributes,
+  }));
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'public, max-age=30',
+    'Access-Control-Allow-Origin': '*',
+    'Content-Length': body.length,
+  });
+  res.end(body);
+  return true;
+}
+
 export async function handleExplorer(req, res, pathname) {
   const url = new URL(req.url, 'http://127.0.0.1');
   const route = pathname || url.pathname;
+  if (await handleDeed(req, res, route)) return true;
   if (route === '/events') {
     sse(req, res);
     return true;

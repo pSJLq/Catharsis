@@ -41,13 +41,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * (more than half of the other members); with only two members the other one can be kicked after 7 days offline.
  * Leaving or being kicked resets the profile again onto a new starter island.
  *
- * Onchain (SkyIsland3, every write server-attested and paid by the player it concerns): the owner's purse sends
+ * Onchain (SkyIsland4, every write server-attested and paid by the player it concerns): the owner's purse sends
  * invite(joiner) when the invite is made; the joiner's purse sends accept(deed) before the reset (a solo deed of the
  * joiner is burned in that call); leave() and kick(member) are sent before the game change. If a write fails, the
  * game change does not happen. coops.yml is a cache of the chain, compared with coopOf(deed) at startup.
  */
 final class Coops implements CommandExecutor, TabCompleter, Listener {
-    /** Hypixel SkyBlock: up to 5 players on a co-op profile (SkyIsland3.MAX_MEMBERS is the same 5). */
+    /** Hypixel SkyBlock: up to 5 players on a co-op profile (SkyIsland4.MAX_MEMBERS is the same 5). */
     static final int MAX_MEMBERS = 5;
     static final long INVITE_MS = 5 * 60_000L;
     static final long VOTE_MS = 5 * 60_000L;
@@ -376,7 +376,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         return why.startsWith("Purse has") || why.toLowerCase(Locale.ROOT).contains("insufficient funds");
     }
 
-    /** The owner's deed on SkyIsland3, created (owner pays) when the owner has none. Off the main thread. */
+    /** The owner's deed on SkyIsland4, created (owner pays) when the owner has none. Off the main thread. */
     private BigInteger ownerDeed(Profile owner) throws Exception {
         BigInteger deed = plugin.wallets().memberIsland(owner.wallet);
         if (deed.signum() == 0) {
@@ -391,15 +391,18 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         return deed;
     }
 
-    /** SkyIsland3.invite(joiner) from the owner's purse. Null when it is onchain, "gas" or a reason otherwise. */
+    /** SkyIsland4.invite(joiner) from the owner's purse. Null when it is onchain, "gas" or a reason otherwise. */
     private String inviteOnchain(Profile owner, String joiner) {
         try {
             BigInteger deed = ownerDeed(owner);
+            if (plugin.deeds() != null && plugin.deeds().saleOf(deed.longValue()) != null) {
+                return "your island is listed in the Island Market; cancel the listing first (Auction House ➜ Island Market ➜ Your Deeds)";
+            }
             if (plugin.wallets().islandInviteUntil(deed, joiner) > System.currentTimeMillis() / 1000 + INVITE_MS / 1000) {
                 return null;
             }
             String hash = plugin.wallets().inviteToIsland(owner, joiner);
-            plugin.getLogger().info("Co-op: SkyIsland3.invite(" + joiner + ") from " + owner.wallet + " deed #" + deed + " " + hash);
+            plugin.getLogger().info("Co-op: SkyIsland4.invite(" + joiner + ") from " + owner.wallet + " deed #" + deed + " " + hash);
             return null;
         } catch (Exception e) {
             plugin.getLogger().warning("Co-op invite onchain failed for " + joiner + " (owner " + owner.wallet + "): " + e.getMessage());
@@ -569,7 +572,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
     }
 
     /**
-     * SkyIsland3 join, off the main thread: makes sure the owner's invite is live (owner pays a fresh one if needed),
+     * SkyIsland4 join, off the main thread: makes sure the owner's invite is live (owner pays a fresh one if needed),
      * a joiner who is only a member of some other deed leaves it, then the joiner's purse sends accept(deed). A solo
      * deed of the joiner is burned by accept. Nothing in the game changes unless memberIsland(joiner) == deed after.
      */
@@ -582,7 +585,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
             BigInteger deed = ownerDeed(owner);
             if (plugin.wallets().islandInviteUntil(deed, joiner.wallet) == 0) {
                 String hash = plugin.wallets().inviteToIsland(owner, joiner.wallet);
-                plugin.getLogger().info("Co-op: SkyIsland3.invite(" + joiner.wallet + ") again from " + owner.wallet + " deed #" + deed + " " + hash);
+                plugin.getLogger().info("Co-op: SkyIsland4.invite(" + joiner.wallet + ") again from " + owner.wallet + " deed #" + deed + " " + hash);
             }
             step = "joiner";
             BigInteger current = plugin.wallets().memberIsland(joiner.wallet);
@@ -605,7 +608,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
             if (!after.equals(deed)) {
                 return new Onchain(false, false, 0, "accept did not record the membership (deed #" + after + ")");
             }
-            plugin.getLogger().info("Co-op: SkyIsland3.accept(" + deed + ") from " + joiner.wallet
+            plugin.getLogger().info("Co-op: SkyIsland4.accept(" + deed + ") from " + joiner.wallet
                     + (current.signum() > 0 ? " (released deed #" + current + ")" : "") + " " + hash);
             return new Onchain(true, true, deed.longValue(), hash);
         } catch (Exception e) {
@@ -682,7 +685,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
                 plugin.islands().joinCoop(fresh, owned);
                 plugin.getLogger().info("Co-op: " + name(me) + " (" + fresh.wallet + ") joined " + name(ownerId) + "'s island at "
                         + owned.islandX + "," + owned.islandZ + " (" + coop.size() + "/" + MAX_MEMBERS + "); onchain: "
-                        + (result.recorded() ? "SkyIsland3.accept " + result.note() : "not recorded (" + result.note() + ")")
+                        + (result.recorded() ? "SkyIsland4.accept " + result.note() : "not recorded (" + result.note() + ")")
                         + "; old island slot " + home[0] + "," + home[1] + " kept for a later leave.");
                 Player o = Bukkit.getPlayer(ownerId);
                 if (o != null) {
@@ -742,7 +745,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         });
     }
 
-    /** SkyIsland3.leave() from the member's purse when the chain lists them on this deed. Null when done. */
+    /** SkyIsland4.leave() from the member's purse when the chain lists them on this deed. Null when done. */
     private String leaveOnchain(Profile p, Coop coop) {
         if (plugin.chain() == null || !plugin.chain().enabled()) {
             return null;
@@ -754,7 +757,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
                 return null;
             }
             String hash = plugin.wallets().leaveIsland(p);
-            plugin.getLogger().info("Co-op: SkyIsland3.leave() from " + p.wallet + " deed #" + deed + " " + hash);
+            plugin.getLogger().info("Co-op: SkyIsland4.leave() from " + p.wallet + " deed #" + deed + " " + hash);
             return null;
         } catch (Exception e) {
             plugin.getLogger().warning("Co-op leave onchain failed for " + p.wallet + ": " + e.getMessage());
@@ -823,7 +826,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         }
     }
 
-    /** Kick after the vote (or the 7-day rule): SkyIsland3.kick(target) from the kicker's purse first. */
+    /** Kick after the vote (or the 7-day rule): SkyIsland4.kick(target) from the kicker's purse first. */
     private void doKick(Coop coop, UUID target, String why, UUID by) {
         busy.add(target);
         Profile kicker = plugin.profiles().get(by);
@@ -854,7 +857,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         });
     }
 
-    /** SkyIsland3.kick(member) from the kicker's purse when the chain lists the member on the kicker's deed. */
+    /** SkyIsland4.kick(member) from the kicker's purse when the chain lists the member on the kicker's deed. */
     private String kickOnchain(Profile by, Profile member) {
         if (plugin.chain() == null || !plugin.chain().enabled() || member.wallet == null || member.wallet.isBlank()) {
             return null;
@@ -866,7 +869,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
                 return null;
             }
             String hash = plugin.wallets().kickFromIsland(by, member.wallet);
-            plugin.getLogger().info("Co-op: SkyIsland3.kick(" + member.wallet + ") from " + by.wallet + " deed #" + deed + " " + hash);
+            plugin.getLogger().info("Co-op: SkyIsland4.kick(" + member.wallet + ") from " + by.wallet + " deed #" + deed + " " + hash);
             return null;
         } catch (Exception e) {
             plugin.getLogger().warning("Co-op kick onchain failed for " + member.wallet + " by " + by.wallet + ": " + e.getMessage());
@@ -896,7 +899,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         }
         plugin.islands().leaveCoop(p, home);
         plugin.getLogger().info("Co-op: " + name(id) + " " + how + " from " + name(coop.owner) + "'s co-op; profile reset onto island "
-                + p.islandX + "," + p.islandZ + (wasOnchain ? "; removed from SkyIsland3 deed #" + coop.deed + " before the reset" : "") + ".");
+                + p.islandX + "," + p.islandZ + (wasOnchain ? "; removed from SkyIsland4 deed #" + coop.deed + " before the reset" : "") + ".");
         for (UUID m : coop.all()) {
             Player online = Bukkit.getPlayer(m);
             if (online != null) {
@@ -919,7 +922,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
     }
 
     /**
-     * Startup check, off the main thread: coops.yml is only a cache of SkyIsland3. For every co-op the deed's
+     * Startup check, off the main thread: coops.yml is only a cache of SkyIsland4. For every co-op the deed's
      * coopOf is read; the onchain set follows the chain, and any player the cache and the chain disagree on is
      * logged for the admin (the game state is not changed automatically).
      */
@@ -973,7 +976,7 @@ final class Coops implements CommandExecutor, TabCompleter, Listener {
         if (checked > 0) {
             save();
         }
-        plugin.getLogger().info("Co-op check against SkyIsland3: " + checked + " co-op(s), " + mismatches + " mismatch(es).");
+        plugin.getLogger().info("Co-op check against SkyIsland4: " + checked + " co-op(s), " + mismatches + " mismatch(es).");
     }
 
     // ------------------------------------------------------------------ chat

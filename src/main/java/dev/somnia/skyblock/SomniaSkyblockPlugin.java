@@ -24,6 +24,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     private Arena arena;
     private Market market;
     private MarketGui marketGui;
+    private IslandDeeds deeds;
     private Quests quests;
     private Skills skills;
     private SkillChain skillChain;
@@ -95,6 +96,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         arena = new Arena(this);
         market = new Market(this);
         marketGui = new MarketGui(this);
+        deeds = new IslandDeeds(this);
         quests = new Quests(this);
         getServer().getPluginManager().registerEvents(quests, this);
         sidebar.quests(quests);
@@ -137,6 +139,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(arena, this);
         getServer().getPluginManager().registerEvents(market, this);
         getServer().getPluginManager().registerEvents(marketGui, this);
+        getServer().getPluginManager().registerEvents(deeds, this);
         EconomyCommands economy = new EconomyCommands(this);
         for (String name : new String[]{"bazaar", "auction", "arena", "stats", "relic", "quest"}) {
             if (getCommand(name) == null) {
@@ -192,6 +195,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         mobs.start();
         arena.start();
         market.start();
+        deeds.start();
         tally.start();
         getLogger().info("SkyRealm " + (realm.enabled() ? realm.address() : "off") + ": bazaar, auctions, arena VRF, relic pool.");
         long period = Math.max(1, getConfig().getInt("batch-seconds", 4)) * 20L;
@@ -222,6 +226,9 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
             hub.restoreRegen();
         }
         flushBatches();
+        if (deeds != null) {
+            deeds.save();
+        }
         if (market != null) {
             market.save();
         }
@@ -329,6 +336,10 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
 
     MarketGui marketGui() {
         return marketGui;
+    }
+
+    IslandDeeds deeds() {
+        return deeds;
     }
 
     Market market() {
