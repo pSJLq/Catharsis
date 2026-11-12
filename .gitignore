@@ -57,3 +57,6 @@ gradle.properties.local
 # Event leaderboard runtime state (player data)
 website/data/event.json
 website/data/event.json.tmp
+
+# Site compressed-file cache (built at runtime)
+website/.cache/
