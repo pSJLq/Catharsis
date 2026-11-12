@@ -81,7 +81,7 @@ function endsAt() {
 function snapshot(b) {
   const players = {};
   for (const p of b.players || []) {
-    players[p.uuid] = { sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: p.txBy || {} };
+    players[p.uuid] = { sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: p.txBy || {}, epoch: p.epoch || 0 };
   }
   return { at: b.at, tx: b.tx || 0, txBy: b.txBy || {}, players };
 }
@@ -146,7 +146,18 @@ function standings(b) {
     if (p.lastSeen < state.start) continue;
     const excluded = ineligible(p);
     if (!excluded) players++;
-    const from = base.players[p.uuid] || { sbXp: 0, level: 0, tx: 0, txBy: {} };
+    let from = base.players[p.uuid];
+    const epoch = p.epoch || 0;
+    if (!from) {
+      // Joined after the start: counts from zero (with the profile epoch it had when first seen).
+      from = base.players[p.uuid] = { sbXp: 0, level: 0, tx: 0, txBy: {}, epoch };
+    } else if ((from.epoch || 0) !== epoch) {
+      // The profile was reset (menu Reset Profile / fresh start): the event count restarts with it. The new
+      // start point is the zeroed profile as the plugin captured it right after the reset, so nothing from
+      // before the reset is counted again and the drop never shows as a negative or frozen delta.
+      from = base.players[p.uuid] = { sbXp: p.sbXp || 0, level: p.level || 0, tx: p.tx || 0, txBy: { ...(p.txBy || {}) }, epoch, resetAt: b.at || Date.now() };
+      if (state.reach) delete state.reach[p.uuid];
+    }
     const xp = Math.max(0, (p.sbXp || 0) - from.sbXp);
     const lv = Math.max(0, (p.level || 0) - from.level);
     const tx = Math.max(0, (p.tx || 0) - from.tx);

@@ -148,7 +148,10 @@ final class IslandManager {
             p.questStep = 0;
             p.questProgress = 0;
             p.questSkip.clear();
+            p.questRetired = 0;
             p.questVersion = Quests.VERSION;
+            java.util.Arrays.fill(p.xpTenths, 0);
+            p.resets++; // the website leaderboard starts this player's count again
             p.discovered.clear();
             p.seenHub = false;
             p.seenCoal = false;
@@ -160,9 +163,59 @@ final class IslandManager {
             p.lastPos = null;
         }
         repaste(p, true);
+        EventTally.profileReset(p);
         plugin.getLogger().info("Fresh start for " + p.uuid + " (" + p.wallet + "): island " + p.islandX + "," + p.islandZ
                 + " rebuilt from the starter, " + (onchainReset ? "skills reset onchain (SkySkills2.resetProfile) at next login" : "skills base " + java.util.Arrays.toString(p.skillsBase))
                 + ", bag clears onchain at next login.");
+    }
+
+    /**
+     * SkyBlock Menu > Profile Management > Reset Profile (after the confirm page): the same full reset as the admin
+     * fresh start, for the player's own profile. Open trades and the stash would lose items or escrowed STT, so they
+     * must be settled first. The player is disconnected first, so nothing in game still holds the old state; the
+     * onchain parts (SkySkills resetProfile, SkyWord bag clear) are sent from their purse when they join again.
+     */
+    void resetProfile(org.bukkit.entity.Player player) {
+        net.kyori.adventure.text.format.NamedTextColor red = net.kyori.adventure.text.format.NamedTextColor.RED;
+        Profile p = plugin.profiles().get(player.getUniqueId());
+        if (!p.islandReady || p.wallet == null || p.wallet.isBlank()) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("Your profile is not set up yet, there is nothing to reset.", red));
+            return;
+        }
+        if (plugin.words() != null && plugin.words().busy(player)) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("A signature is still in flight. Try again in a few seconds.", red));
+            return;
+        }
+        int trades = plugin.market() == null ? 0 : plugin.market().openTrades(p.uuid);
+        if (trades > 0) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("You have " + trades + " open Bazaar/Auction House trade(s). Cancel or finish them first (/bz orders, /ah), then reset.", red));
+            return;
+        }
+        if (plugin.market() != null && plugin.market().hasStash(p.uuid)) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("Items wait in your stash. Claim them first (/bz claim), then reset.", red));
+            return;
+        }
+        long placed = plugin.minions().countOn(p);
+        if (placed > 0) {
+            player.sendMessage(net.kyori.adventure.text.Component.text("You have " + placed + " placed minion(s); the reset cannot run yet.", red));
+            return;
+        }
+        java.util.UUID id = p.uuid;
+        String name = player.getName();
+        plugin.getLogger().info("Profile reset requested by " + name + " (" + id + ", " + p.wallet + ").");
+        player.kick(net.kyori.adventure.text.Component.text("Your profile is being reset. Join again to start fresh.", net.kyori.adventure.text.format.NamedTextColor.YELLOW));
+        // Two ticks later the quit handlers (craft grid, bag, sessions) have run; then wipe and save.
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (Bukkit.getPlayer(id) != null) {
+                plugin.getLogger().warning("Profile reset for " + name + " skipped: the player is online again.");
+                return;
+            }
+            Profile fresh = plugin.profiles().get(id);
+            freshStart(fresh);
+            plugin.profiles().save(fresh);
+            EventTally.profileReset(fresh);
+            plugin.getLogger().info("Profile reset done for " + name + " (resets: " + fresh.resets + ").");
+        }, 2L);
     }
 
     void ensureIsland(Profile profile) {
@@ -265,7 +318,7 @@ final class IslandManager {
         }
         return java.util.List.of("The cobble machine regrows the framed cobblestone. Mine it with a pickaxe you craft.",
                 "The starter chest has blocks and buckets; craft your tools from the tree's logs. The portal goes to the hub. /hub and /is.",
-                "Place your minion with /minion place. Coal is first; a stone pick reaches the iron.");
+                Minions.ENABLED ? "Place your minion with /minion place. Coal is first; a stone pick reaches the iron." : "Coal is first; a stone pick reaches the iron. Minions: SOON.");
     }
 
     /** Island spawn: the template's spawn for template islands, otherwise the origin. */

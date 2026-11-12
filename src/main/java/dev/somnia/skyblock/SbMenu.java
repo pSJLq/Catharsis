@@ -511,14 +511,18 @@ final class SbMenu implements Listener, CommandExecutor {
                 plain("See the armor you wear and", NamedTextColor.GRAY), plain("what each piece adds.", NamedTextColor.GRAY),
                 Component.empty(), click("Click to view!"))),
                 c -> openWardrobe(player));
-        view.set(33, icon(Material.COBBLESTONE, plain("Minions", NamedTextColor.GREEN), List.of(
-                plain("Minions work your island while", NamedTextColor.GRAY), plain("you are away.", NamedTextColor.GRAY),
-                Component.empty(), plain("Placed: ", NamedTextColor.GRAY).append(plain(String.valueOf(plugin.minions().count(player.getUniqueId())), NamedTextColor.YELLOW)),
-                plain("In storage: ", NamedTextColor.GRAY).append(plain(String.valueOf(profile.minionsHeld), NamedTextColor.YELLOW)),
-                Component.empty(), plain("Place one: /minion place", NamedTextColor.DARK_GRAY))), c -> {
-                    player.closeInventory();
-                    plugin.minions().place(player);
-                });
+        if (Minions.ENABLED) {
+            view.set(33, icon(Material.COBBLESTONE, plain("Minions", NamedTextColor.GREEN), List.of(
+                    plain("Minions work your island while", NamedTextColor.GRAY), plain("you are away.", NamedTextColor.GRAY),
+                    Component.empty(), plain("Placed: ", NamedTextColor.GRAY).append(plain(String.valueOf(plugin.minions().count(player.getUniqueId())), NamedTextColor.YELLOW)),
+                    plain("In storage: ", NamedTextColor.GRAY).append(plain(String.valueOf(profile.minionsHeld), NamedTextColor.YELLOW)),
+                    Component.empty(), plain("Place one: /minion place", NamedTextColor.DARK_GRAY))), c -> {
+                        player.closeInventory();
+                        plugin.minions().place(player);
+                    });
+        } else {
+            view.set(33, soon(Material.COBBLESTONE, "Minions", "Minions that work your island while you are away."), null);
+        }
 
         view.set(28, soon(Material.BONE, "Pets", "Pets that follow you and add stats."), null);
         view.set(34, soon(Material.LEATHER, "Accessory Bag", "Talismans and accessories that add stats."), null);
@@ -531,7 +535,7 @@ final class SbMenu implements Listener, CommandExecutor {
                 plain("SkyBlock Level ", NamedTextColor.GRAY).append(plain(String.valueOf(Skills.skyblockLevel(profile)), Skills.levelColor(Skills.skyblockLevel(profile)))),
                 plain("Coins ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", profile.coins), NamedTextColor.GOLD)),
                 plain("SkyBlock Level rewards: ", NamedTextColor.GRAY).append(plain("SOON", NamedTextColor.GRAY).decoration(TextDecoration.BOLD, true)),
-                Component.empty(), click("Click to show deposit info!"))), c -> { player.closeInventory(); player.performCommand("deposit"); });
+                Component.empty(), click("Click to manage your profile!"))), c -> openProfile(player));
         view.set(49, icon(Material.BARRIER, plain("Close", NamedTextColor.RED), List.of()), c -> player.closeInventory());
         view.set(50, icon(Material.REDSTONE_TORCH, plain("Settings", NamedTextColor.GREEN), List.of(
                 plain("Toggle the objective bar and", NamedTextColor.GRAY), plain("the menu star.", NamedTextColor.GRAY),
@@ -774,8 +778,8 @@ final class SbMenu implements Listener, CommandExecutor {
         View view = page("SkyBlock Leveling");
         int[] skills = coreSkills(profile);
         int[] cols = coreCollections(profile);
-        int story = Quests.SKYBLOCK_XP * Quests.completed(profile);
-        int storyMax = Quests.SKYBLOCK_XP * Quests.STEPS.size();
+        int story = Quests.SKYBLOCK_XP * Quests.xpSteps(profile);
+        int storyMax = Quests.SKYBLOCK_XP * (Quests.STEPS.size() + Math.max(0, profile.questRetired));
         int areas = areasXp(profile);
         int total = skills[1] + cols[1] + storyMax + areas;
         List<Component> rank = new ArrayList<>();
@@ -1174,7 +1178,11 @@ final class SbMenu implements Listener, CommandExecutor {
                 }
                 boolean known = profile.discovered.contains(d.id());
                 if (!known) {
-                    view.set(slots[i++], icon(Material.GRAY_DYE, plain(d.name(), NamedTextColor.RED), List.of(plain("Discover this area on foot", NamedTextColor.GRAY), plain("to unlock its warp.", NamedTextColor.GRAY))), null);
+                    view.set(slots[i++], icon(Material.GRAY_DYE, plain(d.name(), NamedTextColor.RED), List.of(
+                            plain("LOCKED", NamedTextColor.RED).decoration(TextDecoration.BOLD, true),
+                            plain("Visit this location first.", NamedTextColor.GRAY),
+                            plain("Walk there once to unlock its warp.", NamedTextColor.DARK_GRAY))),
+                            c -> player.sendMessage(Component.text("Visit " + d.name() + " first: walk there once to unlock its warp.", NamedTextColor.RED)));
                     continue;
                 }
                 Material m = d.combat() ? Material.IRON_SWORD : Material.MAP;
@@ -1193,6 +1201,11 @@ final class SbMenu implements Listener, CommandExecutor {
             return;
         }
         player.closeInventory();
+        // Fast travel only to places this profile has visited on foot (checked again here: a menu can be stale).
+        if (!plugin.profiles().get(player.getUniqueId()).discovered.contains(d.id())) {
+            player.sendMessage(Component.text("Visit " + d.name() + " first: walk there once to unlock its warp.", NamedTextColor.RED));
+            return;
+        }
         if ("colosseum".equals(d.id())) {
             plugin.hub().toColosseum(player);
             return;
@@ -1205,6 +1218,52 @@ final class SbMenu implements Listener, CommandExecutor {
         player.teleport(at);
         player.setFallDistance(0);
         player.sendMessage(Component.text("Warped to " + d.name() + ".", NamedTextColor.GREEN));
+    }
+
+    // ------------------------------------------------------------------ profile management
+    void openProfile(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        View view = page("Profile Management");
+        view.set(13, icon(Material.NAME_TAG, plain("Your Profile", NamedTextColor.GREEN), List.of(
+                plain("Purse ", NamedTextColor.GRAY).append(plain(WalletService.shortAddress(profile.wallet), NamedTextColor.AQUA)),
+                plain("SkyBlock Level ", NamedTextColor.GRAY).append(plain(String.valueOf(Skills.skyblockLevel(profile)), Skills.levelColor(Skills.skyblockLevel(profile)))),
+                plain("Coins ", NamedTextColor.GRAY).append(plain(String.format(java.util.Locale.ROOT, "%,d", profile.coins), NamedTextColor.GOLD)))), null);
+        view.set(29, icon(Material.GOLD_INGOT, plain("Deposit Info", NamedTextColor.GOLD), List.of(
+                plain("Your purse address and the", NamedTextColor.GRAY), plain("faucet for STT gas.", NamedTextColor.GRAY),
+                Component.empty(), click("Click to show!"))), c -> { player.closeInventory(); player.performCommand("deposit"); });
+        view.set(33, icon(Material.TNT, plain("Reset Profile", NamedTextColor.RED), List.of(
+                plain("Start over from zero: skills,", NamedTextColor.GRAY), plain("collections, quests, coins, bag", NamedTextColor.GRAY),
+                plain("and island are wiped, in game", NamedTextColor.GRAY), plain("and onchain. Your purse and its", NamedTextColor.GRAY),
+                plain("STT stay yours.", NamedTextColor.GRAY), Component.empty(),
+                plain("Your event leaderboard count", NamedTextColor.GRAY), plain("starts again from zero.", NamedTextColor.GRAY),
+                Component.empty(), plain("Click to continue!", NamedTextColor.RED))), c -> openResetConfirm(player));
+        footer(view, player, () -> openMain(player));
+        player.openInventory(view.inventory);
+    }
+
+    private void openResetConfirm(Player player) {
+        View view = page("Reset Profile?");
+        List<Component> warn = new ArrayList<>();
+        warn.add(plain("This cannot be undone.", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
+        warn.add(Component.empty());
+        warn.add(plain("Wiped: skills, collections, quests,", NamedTextColor.GRAY));
+        warn.add(plain("coins, discovered areas, every item", NamedTextColor.GRAY));
+        warn.add(plain("in your bag and ender chest, and your", NamedTextColor.GRAY));
+        warn.add(plain("island (rebuilt as a new starter).", NamedTextColor.GRAY));
+        warn.add(plain("Onchain: skills and collections are", NamedTextColor.GRAY));
+        warn.add(plain("reset and the bag is cleared from", NamedTextColor.GRAY));
+        warn.add(plain("your purse (a little STT gas).", NamedTextColor.GRAY));
+        warn.add(Component.empty());
+        warn.add(plain("Kept: your purse, its STT and key.", NamedTextColor.GREEN));
+        warn.add(plain("You are disconnected; join again.", NamedTextColor.GRAY));
+        view.set(13, icon(Material.TNT, plain("Reset your profile?", NamedTextColor.RED), warn), null);
+        view.set(30, icon(Material.RED_TERRACOTTA, plain("Yes, reset everything", NamedTextColor.RED).decoration(TextDecoration.BOLD, true), List.of(
+                plain("Wipes this profile now.", NamedTextColor.GRAY), Component.empty(), plain("Click to reset!", NamedTextColor.RED))),
+                c -> { player.closeInventory(); plugin.islands().resetProfile(player); });
+        view.set(32, icon(Material.LIME_TERRACOTTA, plain("No, keep my profile", NamedTextColor.GREEN), List.of(
+                plain("Nothing changes.", NamedTextColor.GRAY), Component.empty(), click("Click to go back!"))), c -> openProfile(player));
+        footer(view, player, () -> openProfile(player));
+        player.openInventory(view.inventory);
     }
 
     private void openSettings(Player player) {

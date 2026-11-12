@@ -57,6 +57,8 @@ final class EventTally implements Listener {
         String ipTag;
         int level;
         int sbXp;
+        /** Profile.resets seen together with sbXp: the website restarts the player's event count when it changes. */
+        int epoch;
         final long[] xp = new long[Skills.Skill.values().length];
         // rolling windows (memory only)
         final long[] prevXp = new long[Skills.Skill.values().length];
@@ -132,6 +134,17 @@ final class EventTally implements Listener {
             return "market";
         }
         return "other";
+    }
+
+    /** Right after a full profile reset (main thread): take the new (zeroed) totals and epoch at once. */
+    static void profileReset(Profile profile) {
+        EventTally t = instance;
+        if (t == null || profile == null) {
+            return;
+        }
+        Rec r = t.recs.computeIfAbsent(profile.uuid, u -> new Rec());
+        t.capture(r, profile, false);
+        r.havePrev = false; // the rolling XP-per-hour window must not see the drop as anything
     }
 
     // ------------------------------------------------------------------ actions (main thread)
@@ -230,6 +243,7 @@ final class EventTally implements Listener {
             return;
         }
         synchronized (profile) {
+            r.epoch = profile.resets;
             r.sbXp = Skills.skyblockXp(profile);
             r.level = r.sbXp / 100;
             for (Skills.Skill s : Skills.Skill.values()) {
@@ -353,6 +367,7 @@ final class EventTally implements Listener {
             o.addProperty("online", Bukkit.getPlayer(e.getKey()) != null);
             o.addProperty("level", r.level);
             o.addProperty("sbXp", r.sbXp);
+            o.addProperty("epoch", r.epoch);
             JsonObject skills = new JsonObject();
             JsonObject hour = new JsonObject();
             for (Skills.Skill s : Skills.Skill.values()) {

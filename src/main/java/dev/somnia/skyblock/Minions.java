@@ -47,6 +47,12 @@ import java.util.UUID;
  * at half rate (no place animation), up to its storage cap.
  */
 final class Minions implements Listener, CommandExecutor {
+    /**
+     * Minions are not ready yet (SOON): nothing is handed out, nothing can be placed and nothing produces, so no
+     * collection or skill XP comes from minions (also none while the owner is away). Saved data (minions.yml,
+     * minions-held, starter-minion) is kept untouched for when they return.
+     */
+    static final boolean ENABLED = false;
     static final int MAX_TIER = 5;
     private static final int[] DELAY = {0, 14, 13, 12, 11, 10};
     private static final long[] UPGRADE = {0, 250, 1000, 3000, 8000};
@@ -98,6 +104,10 @@ final class Minions implements Listener, CommandExecutor {
 
     void start() {
         load();
+        if (!ENABLED) {
+            plugin.getLogger().info("Minions are disabled (SOON): no placing, no production; " + minions.size() + " saved minion(s) kept as they are.");
+            return;
+        }
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 40L, 20L);
         plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
             if (dirty) {
@@ -174,6 +184,9 @@ final class Minions implements Listener, CommandExecutor {
     // ------------------------------------------------------------------ placing and the stand
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(SbLoginEvent event) {
+        if (!ENABLED) {
+            return; // no starter minion while minions are SOON (starter-minion stays false, so it comes later)
+        }
         Player player = event.getPlayer();
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (!profile.starterMinion) {
@@ -196,6 +209,10 @@ final class Minions implements Listener, CommandExecutor {
             sender.sendMessage("Players only.");
             return true;
         }
+        if (!ENABLED) {
+            player.sendMessage(soonText());
+            return true;
+        }
         if (args.length > 0 && args[0].equalsIgnoreCase("place")) {
             place(player);
             return true;
@@ -206,7 +223,15 @@ final class Minions implements Listener, CommandExecutor {
         return true;
     }
 
+    static Component soonText() {
+        return Component.text("Minions are coming SOON.", NamedTextColor.YELLOW);
+    }
+
     void place(Player player) {
+        if (!ENABLED) {
+            player.sendMessage(soonText());
+            return;
+        }
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (profile.minionsHeld <= 0) {
             player.sendMessage(Component.text("You have no minion in storage. Pick one up from its menu first.", NamedTextColor.RED));
@@ -371,6 +396,10 @@ final class Minions implements Listener, CommandExecutor {
             return;
         }
         event.setCancelled(true);
+        if (!ENABLED) {
+            event.getPlayer().sendMessage(soonText());
+            return;
+        }
         Minion m = byStand(e);
         if (m == null) {
             return;
@@ -502,6 +531,9 @@ final class Minions implements Listener, CommandExecutor {
     }
 
     private void produce(Minion m, long amount) {
+        if (!ENABLED) {
+            return;
+        }
         long room = m.capacity() - m.stored;
         long add = Math.min(room, amount);
         if (add <= 0) {

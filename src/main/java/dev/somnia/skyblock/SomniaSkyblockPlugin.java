@@ -107,6 +107,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         craft = new CraftGui(this);
         getServer().getPluginManager().registerEvents(craft, this);
         getServer().getPluginManager().registerEvents(minions, this);
+        getServer().getPluginManager().registerEvents(new ItemSync(this), this);
         for (String name : new String[]{"sbmenu", "skills", "collection", "calendar", "warp", "levels"}) {
             if (getCommand(name) == null) {
                 throw new IllegalStateException("plugin.yml has no command /" + name);

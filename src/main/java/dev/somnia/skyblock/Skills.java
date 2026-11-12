@@ -171,7 +171,7 @@ final class Skills implements Listener {
         for (Collects.Entry entry : Collects.ENTRIES) {
             xp += 4 * ProgressMath.tier(Collects.amount(p, entry));
         }
-        xp += Quests.SKYBLOCK_XP * Quests.completed(p);
+        xp += Quests.SKYBLOCK_XP * Quests.xpSteps(p);
         for (String key : p.discovered) {
             if (!key.contains(":")) {
                 xp += 5;

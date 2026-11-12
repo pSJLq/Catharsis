@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 
 /**
  * The intro quest line (v2), given by Wren on the island and the Quest Giver in the hub. It follows the order of the
- * wiki's starter quests: your island by hand (log, crafting, a wooden pickaxe, cobblestone, a minion), then the hub
+ * wiki's starter quests: your island by hand (log, crafting, a wooden pickaxe, cobblestone), then the hub
  * (logs, crops, selling, ore, the Banker and your purse), then combat (a sword, the undead, armor, skills that give
  * Health/Defense/Strength, the wolves), then trading (Bazaar, Auction House) and exploring.
  *
@@ -67,8 +67,11 @@ final class Quests implements Listener {
 
     /** Wiki SkyBlock Levels: +5 SkyBlock XP per objective completed. */
     static final int SKYBLOCK_XP = 5;
-    /** 2 = the 23-step line; 3 = the same without the Colosseum wave (the Colosseum is sealed, Arena.ENABLED = false). */
-    static final int VERSION = 3;
+    /**
+     * 2 = the 23-step line; 3 = the same without the Colosseum wave (the Colosseum is sealed, Arena.ENABLED = false);
+     * 4 = also without "Place your Cobblestone Minion" (minions are SOON, Minions.ENABLED = false).
+     */
+    static final int VERSION = 4;
     /** Same address as the website footer's Donate button. */
     static final String DONATE = "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D";
     /** Hub districts counted by the exploring step. */
@@ -86,8 +89,6 @@ final class Quests implements Listener {
                     "SkyBlock Menu > Crafting Table. Logs make planks, planks make sticks; 3 planks over 2 sticks make the pickaxe."),
             new Step("island_cobble", 10, 0, null, 0, "Mine 10 Cobblestone",
                     "Use your new pickaxe on the cobblestone generator. It regrows every block you mine."),
-            new Step("place_minion", 1, 0, null, 0, "Place your Cobblestone Minion",
-                    "On your island, look at a block with two free blocks above it and type /minion place."),
             new Step("talk_quest", 1, 0, null, 0, "Meet the Quest Giver in {plaza}",
                     "Take the island portal or type /hub. The Quest Giver waits south of the fountain."),
             new Step("hub_log", 20, 1000, Skills.Skill.FORAGING, 100, "Chop 20 logs in {forest}",
@@ -160,30 +161,70 @@ final class Quests implements Listener {
         return Math.min(STEPS.size(), profile.questStep + profile.questSkip.size());
     }
 
+    /**
+     * Steps that give SkyBlock XP: the finished ones plus finished steps that were later taken out of the line
+     * (Profile.questRetired, e.g. a placed minion), so removing a step never takes XP away.
+     */
+    static int xpSteps(Profile profile) {
+        return completed(profile) + Math.max(0, profile.questRetired);
+    }
+
     static boolean done(Profile profile, int index) {
         return index < profile.questStep || (index < STEPS.size() && profile.questSkip.contains(STEPS.get(index).event()));
     }
 
     /**
-     * v1 -> v2. Returns true when the profile changed. Pure (no Player), safe to run while loading.
+     * Older quest lines -> the current one (v1, v2, v3 -> v4). Returns true when the profile changed. Pure (no Player),
+     * safe to run while loading.
      */
     static boolean migrate(Profile profile) {
         if (profile.questVersion >= VERSION) {
             return false;
         }
-        if (profile.questVersion == 2) {
-            // v2 -> v3: the "wave" step (v2 index 17) is gone. It could never be finished (the Colosseum is sealed),
-            // so nobody is past it; a player standing on it moves on to the next step with fresh progress.
-            final int wave = 17;
-            if (profile.questStep == wave) {
-                profile.questProgress = 0;
-            } else if (profile.questStep > wave) {
-                profile.questStep--;
+        if (profile.questVersion == 2 || profile.questVersion == 3) {
+            if (profile.questVersion == 2) {
+                waveOut(profile);
             }
-            profile.questSkip.remove("wave");
+            minionOut(profile);
             profile.questVersion = VERSION;
             return true;
         }
+        return fromV1(profile);
+    }
+
+    /** v2 -> v3 (questStep in v2 indexes). */
+    private static void waveOut(Profile profile) {
+        // The "wave" step (v2 index 17) is gone. It could never be finished (the Colosseum is sealed), so nobody is
+        // past it; a player standing on it moves on to the next step with fresh progress.
+        final int wave = 17;
+        if (profile.questStep == wave) {
+            profile.questProgress = 0;
+        } else if (profile.questStep > wave) {
+            profile.questStep--;
+        }
+        profile.questSkip.remove("wave");
+    }
+
+    /**
+     * v3 -> v4 (questStep in v3 indexes): "place_minion" (v3 index 5) is gone. A player past it keeps its 5 SkyBlock
+     * XP in questRetired and stays on the same next step; a player standing on it moves to the next step (it had no
+     * reward yet, so nothing is lost or given twice).
+     */
+    private static void minionOut(Profile profile) {
+        final int minion = 5;
+        if (profile.questStep == minion) {
+            profile.questProgress = 0;
+        } else if (profile.questStep > minion) {
+            profile.questStep--;
+            profile.questRetired++;
+        }
+        if (profile.questSkip.remove("place_minion")) {
+            profile.questRetired++;
+        }
+    }
+
+    /** v1 -> current line. v1 had neither the wave nor the minion step. */
+    private static boolean fromV1(Profile profile) {
         int oldStep = Math.max(0, Math.min(profile.questStep, V1.size()));
         int oldProgress = profile.questProgress;
         String oldCurrent = oldStep < V1.size() ? V1.get(oldStep) : null;
@@ -314,7 +355,7 @@ final class Quests implements Listener {
         }
     }
 
-    /** How much of a step is already true right now (levels, areas found, a pickaxe owned, a minion placed). */
+    /** How much of a step is already true right now (levels, areas found, a pickaxe owned). */
     private int already(Player player, Profile profile, String event) {
         switch (event) {
             case "level":
@@ -328,8 +369,6 @@ final class Quests implements Listener {
                     }
                 }
                 return 0;
-            case "place_minion":
-                return plugin.minions() != null && plugin.minions().countOn(profile) > 0 ? 1 : 0;
             default:
                 if (event.startsWith("level_")) {
                     for (Skills.Skill skill : Skills.Skill.values()) {

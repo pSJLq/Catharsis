@@ -249,6 +249,27 @@ final class CraftGui implements Listener {
         ClickType click = event.getClick();
         InventoryAction action = event.getAction();
 
+        // The result slot always holds the marked preview item, so it has to be handled before the generic
+        // "a preview item was clicked" guard below (that guard cancelled every result click: nothing was crafted).
+        if (clicked == event.getView().getTopInventory() && raw == RESULT) {
+            event.setCancelled(true);
+            if (isDisplay(event.getCursor()) || SbMenu.isStar(plugin, event.getCursor())) {
+                stripDisplay(player);
+                return;
+            }
+            Boolean max = resultClick(click);
+            if (max != null) {
+                // Next tick: the cancelled click's own slot/cursor resync must not overwrite the crafted items.
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    if (player.isOnline() && !view.locked && player.getOpenInventory().getTopInventory().getHolder() == view) {
+                        craft(player, view, max);
+                        player.updateInventory();
+                    }
+                });
+            }
+            return;
+        }
+
         if (starClick(event, player) || isDisplay(event.getCursor()) || isDisplay(event.getCurrentItem())) {
             event.setCancelled(true);
             stripDisplay(player);
@@ -288,11 +309,7 @@ final class CraftGui implements Listener {
                 return;
             }
             event.setCancelled(true);
-            if (raw == RESULT) {
-                if (click == ClickType.LEFT || click == ClickType.RIGHT || click == ClickType.SHIFT_LEFT || click == ClickType.SHIFT_RIGHT) {
-                    craft(player, view, event.isShiftClick());
-                }
-            } else if (raw == BACK) {
+            if (raw == BACK) {
                 plugin.getServer().getScheduler().runTask(plugin, () -> plugin.menu().openMain(player));
             } else if (raw == CLOSE) {
                 plugin.getServer().getScheduler().runTask(plugin, () -> player.closeInventory());
@@ -316,6 +333,26 @@ final class CraftGui implements Listener {
                 refresh(player, view);
             }
             return;
+        }
+    }
+
+    /**
+     * What a click on the result slot does: false = craft once, true = craft as many as fit (shift), null = nothing.
+     * The crafted items always go into the bag (never onto the cursor), so the SkyWord2 write sees all of them.
+     */
+    static Boolean resultClick(ClickType click) {
+        if (click == null) {
+            return null;
+        }
+        switch (click) {
+            case LEFT:
+            case RIGHT:
+                return Boolean.FALSE;
+            case SHIFT_LEFT:
+            case SHIFT_RIGHT:
+                return Boolean.TRUE;
+            default:
+                return null;
         }
     }
 

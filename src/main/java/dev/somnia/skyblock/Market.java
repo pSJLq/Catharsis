@@ -1186,6 +1186,20 @@ final class Market implements Listener {
         player.sendMessage(Component.text("No offer or order #" + id + " of yours.", NamedTextColor.RED));
     }
 
+    /** Open Bazaar offers/orders, live auctions (as seller or top bidder), BIN listings and stash kinds of this player. */
+    int openTrades(UUID me) {
+        long n = offers.values().stream().filter(o -> me.equals(o.seller)).count()
+                + orders.values().stream().filter(o -> me.equals(o.buyer)).count()
+                + lots.values().stream().filter(l -> !l.done && (me.equals(l.seller) || me.equals(l.bidder))).count()
+                + bins.values().stream().filter(b -> me.equals(b.seller)).count();
+        return (int) n;
+    }
+
+    boolean hasStash(UUID me) {
+        Map<String, Integer> mine = stash.get(me);
+        return mine != null && !mine.isEmpty();
+    }
+
     void listMine(Player player) {
         UUID me = player.getUniqueId();
         player.sendMessage(Component.text("—— Your Bazaar ——", NamedTextColor.GOLD));

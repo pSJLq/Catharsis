@@ -726,6 +726,11 @@ final class HubManager implements Listener {
             }
             case "Arena Warden" -> {
                 if (npc.warp()) {
+                    // A warp NPC is fast travel too: only to places this profile has visited on foot.
+                    if (!plugin.profiles().get(player.getUniqueId()).discovered.contains("colosseum")) {
+                        player.sendMessage(Component.text("Visit " + name("colosseum") + " first: walk there once to unlock this warp.", NamedTextColor.RED));
+                        return;
+                    }
                     toColosseum(player);
                 } else {
                     plugin.arena().open(player);

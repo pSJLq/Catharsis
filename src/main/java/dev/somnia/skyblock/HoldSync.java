@@ -294,6 +294,15 @@ final class HoldSync implements Listener {
             }
             return;
         }
+        // SkyWord bag: picking up is allowed once the signed bag is loaded (fish, wool, composter or sapling drops);
+        // ItemSync signs the bag right after. Before it loads (or in the sandbox / while paused) items stay on the ground.
+        if (plugin.wordMode() && plugin.words().ready(player) && !sandbox.contains(player.getUniqueId()) && !paused.contains(player.getUniqueId())) {
+            ItemStack stack = event.getItem().getItemStack();
+            if (HoldItems.makeUnbreakable(stack)) {
+                event.getItem().setItemStack(stack);
+            }
+            return;
+        }
         event.setCancelled(true);
     }
 

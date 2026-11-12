@@ -103,6 +103,8 @@ final class ProfileStore {
         profile.questProgress = yaml.getInt("quest-progress");
         profile.questVersion = yaml.getInt("quest-version", 1);
         profile.questSkip.addAll(yaml.getStringList("quest-skip"));
+        profile.questRetired = yaml.getInt("quest-retired");
+        profile.resets = yaml.getInt("profile-resets");
         profile.fishingXp = yaml.getLong("fishing-xp");
         profile.enchantingXp = yaml.getLong("enchanting-xp");
         profile.carpentryXp = yaml.getLong("carpentry-xp");
@@ -150,7 +152,7 @@ final class ProfileStore {
         profile.bossbarOff = yaml.getBoolean("bossbar-off");
         profile.menuItemOff = yaml.getBoolean("menu-item-off");
         if (Quests.migrate(profile)) {
-            plugin.getLogger().info("Quests v1 -> v2 for " + uuid + ": step " + profile.questStep + ", already done later " + profile.questSkip);
+            plugin.getLogger().info("Quests -> v" + Quests.VERSION + " for " + uuid + ": step " + profile.questStep + ", already done later " + profile.questSkip + ", retired " + profile.questRetired);
         }
         return profile;
     }
@@ -197,6 +199,8 @@ final class ProfileStore {
         yaml.set("quest-progress", profile.questProgress);
         yaml.set("quest-version", profile.questVersion);
         yaml.set("quest-skip", new ArrayList<>(profile.questSkip));
+        yaml.set("quest-retired", profile.questRetired);
+        yaml.set("profile-resets", profile.resets);
         yaml.set("fishing-xp", profile.fishingXp);
         yaml.set("enchanting-xp", profile.enchantingXp);
         yaml.set("carpentry-xp", profile.carpentryXp);

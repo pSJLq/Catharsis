@@ -275,8 +275,8 @@ final class TabList implements Listener {
         rows[c++] = soon("Bank");
         rows[c++] = empty;
         rows[c++] = title("Minions", NamedTextColor.YELLOW);
-        rows[c++] = label("Placed", plugin.minions().count(viewer.getUniqueId()) + "", NamedTextColor.YELLOW)
-                .append(t("  Stored: " + profile.minionsHeld, NamedTextColor.GRAY));
+        rows[c++] = Minions.ENABLED ? label("Placed", plugin.minions().count(viewer.getUniqueId()) + "", NamedTextColor.YELLOW)
+                .append(t("  Stored: " + profile.minionsHeld, NamedTextColor.GRAY)) : t(" SOON", NamedTextColor.GRAY);
         rows[c++] = empty;
         rows[c++] = title("Pet", NamedTextColor.YELLOW);
         rows[c++] = t(" SOON", NamedTextColor.GRAY);

@@ -52,6 +52,10 @@ final class Profile {
     int questVersion = Quests.VERSION;
     /** v1 steps already finished that lie further down the v2 line; they complete silently when reached. */
     final java.util.Set<String> questSkip = new java.util.LinkedHashSet<>();
+    /** Finished steps that were later removed from the quest line (v4: the minion step); they keep their SkyBlock XP. */
+    int questRetired;
+    /** Full profile resets so far (menu "Reset Profile" or the admin fresh start); the website leaderboard restarts its count when it changes. */
+    int resets;
     long fishingXp;
     /** Leftover tenths of skill XP per Skills.Skill ordinal (pumpkin +4.5); never sent onchain until they add up to 1. */
     final int[] xpTenths = new int[7];
