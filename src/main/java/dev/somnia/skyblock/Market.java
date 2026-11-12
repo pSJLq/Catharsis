@@ -166,6 +166,8 @@ final class Market implements Listener {
         product("revenant_flesh", "skyblock:revenant_flesh", "Barrow Flesh", 1);
         product("wolf_tooth", "skyblock:wolf_tooth", "Thornkeep Fang", 1);
         product("colosseum_sigil", "skyblock:colosseum_sigil", "Colosseum Sigil", 150);
+        // Sold for SOMI in /cookie; traded here for STT only. npc 0 = merchants never buy it for coins.
+        product(Cookies.ID, Cookies.KEY, "Booster Cookie", 0);
 
         recipe("undead_sword", 150, Map.of(), 0);
         recipe("cleaver", 400, Map.of("minecraft:iron_ingot", 4), 2);
@@ -680,7 +682,7 @@ final class Market implements Listener {
             }
             if (on) {
                 Product product = productOf(stack);
-                if (product != null) {
+                if (product != null && product.npc() > 0) {
                     changed |= Lore.sellView(stack, product.npc());
                 }
             } else {
@@ -714,7 +716,7 @@ final class Market implements Listener {
             return;
         }
         Product product = productOf(stack);
-        if (product == null) {
+        if (product == null || product.npc() <= 0) {
             player.sendMessage(Component.text("That item can't be sold to this shop.", NamedTextColor.RED));
             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.7f, 1f);
             return;
@@ -833,6 +835,10 @@ final class Market implements Listener {
     }
 
     void sellToMerchant(Player player, Product product) {
+        if (product.npc() <= 0) {
+            player.sendMessage(Component.text("Merchants don't buy " + product.name() + ". Sell it on the Bazaar for STT.", NamedTextColor.RED));
+            return;
+        }
         int have = count(player, product.key());
         if (have <= 0 || !take(player, product.key(), have)) {
             return;
@@ -1020,8 +1026,9 @@ final class Market implements Listener {
                 sellToOrder(player, top, Math.min(count(player, product.key()), Math.min(64, top.left)));
             }
         });
-        view.set(14, icon(Material.GOLD_INGOT, "Sell to Merchant", NamedTextColor.GOLD, List.of(
-                "$" + product.npc() + " coins each (" + String.format(java.util.Locale.ROOT, "%,d", (long) have * product.npc()) + " total)", "!Click to sell all")), click -> {
+        view.set(14, icon(Material.GOLD_INGOT, "Sell to Merchant", NamedTextColor.GOLD, product.npc() <= 0
+                ? List.of("-Merchants don't buy this item.", "~Sell it here for STT instead.")
+                : List.of("$" + product.npc() + " coins each (" + String.format(java.util.Locale.ROOT, "%,d", (long) have * product.npc()) + " total)", "!Click to sell all")), click -> {
             sellToMerchant(player, product);
             openProduct(player, product);
         });

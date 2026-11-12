@@ -535,6 +535,8 @@ final class SbMenu implements Listener, CommandExecutor {
                 plain("SkyBlock Level rewards: ", NamedTextColor.GRAY).append(plain("SOON", NamedTextColor.GRAY).decoration(TextDecoration.BOLD, true)),
                 Component.empty(), click("Click to manage your profile!"))), c -> openProfile(player));
         view.set(49, icon(Material.BARRIER, plain("Close", NamedTextColor.RED), List.of()), c -> player.closeInventory());
+        view.set(51, plugin.cookies().menuIcon(player), c -> plugin.cookies().open(player));
+        view.set(52, plugin.cookies().sellIcon(player), c -> plugin.cookies().menuSell(player));
         view.set(50, icon(Material.REDSTONE_TORCH, plain("Settings", NamedTextColor.GREEN), List.of(
                 plain("Toggle the objective bar and", NamedTextColor.GRAY), plain("the menu star.", NamedTextColor.GRAY),
                 Component.empty(), click("Click to open!"))), c -> openSettings(player));

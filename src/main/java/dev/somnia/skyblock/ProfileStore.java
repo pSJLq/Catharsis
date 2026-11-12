@@ -152,6 +152,7 @@ final class ProfileStore {
         profile.starterMinion = yaml.getBoolean("starter-minion");
         profile.bossbarOff = yaml.getBoolean("bossbar-off");
         profile.menuItemOff = yaml.getBoolean("menu-item-off");
+        profile.cookieUntil = yaml.getLong("cookie-until");
         if (Quests.migrate(profile)) {
             plugin.getLogger().info("Quests -> v" + Quests.VERSION + " for " + uuid + ": step " + profile.questStep + ", already done later " + profile.questSkip + ", retired " + profile.questRetired);
         }
@@ -228,6 +229,7 @@ final class ProfileStore {
         yaml.set("starter-minion", profile.starterMinion);
         yaml.set("bossbar-off", profile.bossbarOff);
         yaml.set("menu-item-off", profile.menuItemOff);
+        yaml.set("cookie-until", profile.cookieUntil > 0 ? profile.cookieUntil : null);
         try {
             yaml.save(file(profile.uuid));
         } catch (IOException exception) {

@@ -28,8 +28,21 @@ final class EconomyCommands implements CommandExecutor, TabCompleter {
         }
         try {
             switch (command.getName()) {
-                case "bazaar" -> bazaar(player, args);
-                case "auction" -> auction(player, args);
+                case "bazaar" -> {
+                    if (plugin.cookies().allowAnywhere(player, "Bazaar")) {
+                        bazaar(player, args);
+                    }
+                }
+                case "auction" -> {
+                    if (plugin.cookies().allowAnywhere(player, "Auction House")) {
+                        auction(player, args);
+                    }
+                }
+                case "bank" -> {
+                    if (plugin.cookies().allowAnywhere(player, "Bank")) {
+                        plugin.market().openBank(player);
+                    }
+                }
                 case "arena" -> {
                     if (args.length > 0 && args[0].equalsIgnoreCase("leave")) {
                         plugin.arena().leave(player);

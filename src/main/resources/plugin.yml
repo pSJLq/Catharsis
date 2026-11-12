@@ -70,6 +70,13 @@ commands:
   relic:
     description: Relic Pool bank
     usage: /relic
+  bank:
+    description: Open the Bank (anywhere with the Booster Cookie buff)
+    usage: /bank
+  cookie:
+    description: Booster Cookie - buy with SOMI, buff time left
+    usage: /cookie [buy|address]
+    aliases: [boostercookie]
   quest:
     description: Hub quest path
     usage: /quest

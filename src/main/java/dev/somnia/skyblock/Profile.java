@@ -86,6 +86,8 @@ final class Profile {
     boolean starterMinion;
     boolean bossbarOff;
     boolean menuItemOff;
+    /** Booster Cookie buff end (epoch ms); counts down offline too. */
+    long cookieUntil;
     /** Fresh start: SkySkills is add-only, so XP/collections onchain at the reset are subtracted (chain - base). */
     final long[] skillsBase = new long[SkillChain.SKILLS];
     final long[] colBase = new long[SkillChain.COLLECTIONS];

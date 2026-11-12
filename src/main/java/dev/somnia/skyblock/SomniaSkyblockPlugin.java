@@ -25,6 +25,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     private Market market;
     private MarketGui marketGui;
     private IslandDeeds deeds;
+    private Cookies cookies;
     private Quests quests;
     private Skills skills;
     private SkillChain skillChain;
@@ -97,6 +98,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         market = new Market(this);
         marketGui = new MarketGui(this);
         deeds = new IslandDeeds(this);
+        cookies = new Cookies(this);
         quests = new Quests(this);
         getServer().getPluginManager().registerEvents(quests, this);
         sidebar.quests(quests);
@@ -140,8 +142,15 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(market, this);
         getServer().getPluginManager().registerEvents(marketGui, this);
         getServer().getPluginManager().registerEvents(deeds, this);
+        getServer().getPluginManager().registerEvents(cookies, this);
+        if (getCommand("cookie") == null) {
+            throw new IllegalStateException("plugin.yml has no command /cookie");
+        }
+        getCommand("cookie").setExecutor(cookies);
+        getCommand("cookie").setTabCompleter(cookies);
+        cookies.start();
         EconomyCommands economy = new EconomyCommands(this);
-        for (String name : new String[]{"bazaar", "auction", "arena", "stats", "relic", "quest"}) {
+        for (String name : new String[]{"bazaar", "auction", "bank", "arena", "stats", "relic", "quest"}) {
             if (getCommand(name) == null) {
                 throw new IllegalStateException("plugin.yml has no command /" + name);
             }
@@ -336,6 +345,10 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
 
     MarketGui marketGui() {
         return marketGui;
+    }
+
+    Cookies cookies() {
+        return cookies;
     }
 
     IslandDeeds deeds() {

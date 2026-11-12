@@ -423,7 +423,7 @@ final class SkillChain implements Listener {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if (balance.signum() == 0) {
+                if (balance.signum() == 0 && (plugin.cookies() == null || !plugin.cookies().active(profile))) {
                     throw new IllegalStateException("Purse has 0 STT.");
                 }
                 String hash = plugin.wallets().submitTo(profile, to, WalletService.resetProfile(), BigInteger.ZERO);
@@ -503,7 +503,7 @@ final class SkillChain implements Listener {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if (balance.signum() == 0) {
+                if (balance.signum() == 0 && (plugin.cookies() == null || !plugin.cookies().active(profile))) {
                     throw new IllegalStateException("Purse has 0 STT.");
                 }
                 String hash = plugin.wallets().submitTo(profile, contract(), WalletService.applyXp(s, sa, c, ca), BigInteger.ZERO);

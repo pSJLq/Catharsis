@@ -79,6 +79,8 @@ final class Gear {
                 "Pulled from the Thornkeep Wolves.");
         material("colosseum_sigil", Material.HEART_OF_THE_SEA, "Colosseum Sigil", Rarity.EPIC,
                 "Proof of a ranked run. Its roll is on Somnia.");
+        material(Cookies.ID, Material.COOKIE, "Booster Cookie", Rarity.LEGENDARY,
+                "Right-click to eat: 4 days of /ah, /bz and /bank anywhere, selling from the menu, flight on your island and free gas. Bought with SOMI in /cookie. Resell it on the Bazaar for STT.");
     }
 
     private Gear() {

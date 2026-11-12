@@ -672,6 +672,7 @@ final class WalletService {
         }
         BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
         BigInteger fee = gas.multiply(maxFee);
+        balance = sponsored(profile, from, balance, fee, fee);
         if (balance.compareTo(fee) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This signature can cost up to " + format(fee) + " STT.");
         }
@@ -973,6 +974,7 @@ final class WalletService {
         BigInteger priority = PRIORITY;
         BigInteger balance = web3.ethGetBalance(credentials.getAddress(), DefaultBlockParameterName.LATEST).send().getBalance();
         BigInteger fee = limit.multiply(maxFee);
+        balance = sponsored(profile, credentials.getAddress(), balance, fee, fee);
         if (balance.compareTo(fee) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This signature can cost up to " + format(fee) + " STT.");
         }
@@ -1237,6 +1239,7 @@ final class WalletService {
         }
         BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
         BigInteger need = value.add(gas.multiply(maxFee));
+        balance = sponsored(profile, from, balance, need, gas.multiply(maxFee));
         if (balance.compareTo(need) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT, this needs up to " + format(need) + " STT. /deposit shows your purse.");
         }
@@ -1291,6 +1294,7 @@ final class WalletService {
             throw new IllegalStateException("Deploy needs " + gas + " gas.");
         }
         BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        balance = sponsored(profile, from, balance, gas.multiply(maxFee), gas.multiply(maxFee));
         if (balance.compareTo(gas.multiply(maxFee)) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT, the deploy needs up to " + format(gas.multiply(maxFee)) + " STT.");
         }
@@ -1383,5 +1387,118 @@ final class WalletService {
 
     private static String format(BigInteger wei) {
         return Convert.fromWei(new BigDecimal(wei), Convert.Unit.ETHER).stripTrailingZeros().toPlainString();
+    }
+
+    // ===== Booster Cookie: gas sponsorship (Shannon) and the SOMI payment (mainnet) =====
+
+    private volatile Credentials sponsor;
+
+    /** The admin wallet (secrets.yml admin-key), loaded once; the key is never logged. Null when it is missing. */
+    private Credentials sponsorCredentials() {
+        Credentials made = sponsor;
+        if (made != null) {
+            return made;
+        }
+        String key = YamlConfiguration.loadConfiguration(secretsFile).getString("admin-key", "");
+        if (key == null || !key.trim().matches("(?i)(0x)?[0-9a-f]{64}")) {
+            plugin.getLogger().warning("Gas sponsor: secrets.yml has no admin-key; Booster Cookie gas is not paid.");
+            return null;
+        }
+        made = Credentials.create(key.trim());
+        sponsor = made;
+        plugin.getLogger().info("Gas sponsor wallet " + made.getAddress());
+        return made;
+    }
+
+    /**
+     * Booster Cookie holders: when the purse is short only by gas, the admin wallet sends the missing STT first
+     * (no cap, Shiny's choice). The value of a write (bids, fees) is never sponsored, and neither is /withdraw, so the
+     * float cannot be cashed out for free. Returns the balance to use.
+     */
+    private BigInteger sponsored(Profile profile, String from, BigInteger balance, BigInteger need, BigInteger gasPart) {
+        if (balance.compareTo(need) >= 0 || plugin.cookies() == null || !plugin.cookies().active(profile)) {
+            return balance;
+        }
+        BigInteger missing = need.subtract(balance);
+        if (missing.compareTo(gasPart) > 0) {
+            return balance;
+        }
+        // Top up a small float (cookie.sponsor-topup-stt, default 0.02) so a run of bag writes needs one top-up, not one each.
+        BigInteger floatWei;
+        try {
+            floatWei = Convert.toWei(new BigDecimal(plugin.getConfig().getString("cookie.sponsor-topup-stt", "0.02").trim()), Convert.Unit.ETHER).toBigInteger();
+        } catch (Exception exception) {
+            floatWei = new BigInteger("20000000000000000");
+        }
+        if (missing.compareTo(floatWei) < 0) {
+            missing = floatWei;
+        }
+        try {
+            Credentials admin = sponsorCredentials();
+            if (admin == null) {
+                return balance;
+            }
+            String payer = admin.getAddress();
+            BigInteger gas = transferGas(payer, from, missing);
+            BigInteger maxFee = maxFee();
+            Lane lane = lanes.computeIfAbsent(payer.toLowerCase(Locale.ROOT), ignored -> new Lane());
+            String hash;
+            synchronized (lane.lock) {
+                BigInteger nonce = nextNonce(lane, payer);
+                RawTransaction transaction = RawTransaction.createEtherTransaction(chainId, nonce, gas, from, missing, PRIORITY, maxFee);
+                EthSendTransaction sent = web3.ethSendRawTransaction(Numeric.toHexString(TransactionEncoder.signMessage(transaction, chainId, admin))).send();
+                if (sent.hasError()) {
+                    if (isNonceError(sent.getError().getMessage())) {
+                        lane.next = null;
+                    }
+                    throw new IllegalStateException(trim(sent.getError().getMessage()));
+                }
+                lane.next = nonce.add(BigInteger.ONE);
+                hash = sent.getTransactionHash();
+            }
+            TransactionReceipt receipt = waitReceipt(hash, 120);
+            if (receipt == null || !receipt.isStatusOK()) {
+                throw new IllegalStateException("top-up " + hash + " did not land");
+            }
+            plugin.getLogger().info("Gas sponsor: " + format(missing) + " STT to " + from + " (Booster Cookie) " + hash);
+            return web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        } catch (Exception exception) {
+            plugin.getLogger().warning("Gas sponsor failed for " + from + ": " + exception.getMessage());
+            return balance;
+        }
+    }
+
+    /** A plain SOMI transfer on Somnia mainnet signed by the player's own purse key (same address as on Shannon). */
+    String mainnetPay(Profile profile, Web3j main, long mainChainId, String to, BigInteger value) throws Exception {
+        Credentials credentials = credentials(profile);
+        String from = credentials.getAddress();
+        EthEstimateGas estimated = main.ethEstimateGas(new Transaction(from, null, null, null, to, value, null)).send();
+        if (estimated.hasError() || estimated.getAmountUsed() == null || estimated.getAmountUsed().signum() <= 0) {
+            String why = estimated.hasError() ? trim(estimated.getError().getMessage()) : "no estimate";
+            if (why.toLowerCase(Locale.ROOT).contains("insufficient")) {
+                why = "not enough SOMI in your purse on Somnia mainnet";
+            }
+            throw new IllegalStateException(why + ".");
+        }
+        BigInteger gas = estimated.getAmountUsed().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
+        BigInteger price = main.ethGasPrice().send().getGasPrice();
+        if (price == null || price.compareTo(FEE_FLOOR) < 0) {
+            price = FEE_FLOOR;
+        }
+        BigInteger balance = main.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger need = value.add(gas.multiply(price));
+        if (balance.compareTo(need) < 0) {
+            throw new IllegalStateException("your mainnet purse has " + format(balance) + " SOMI, this needs " + format(value)
+                    + " SOMI plus up to " + format(gas.multiply(price)) + " SOMI network fee. /cookie address shows where to send SOMI.");
+        }
+        BigInteger nonce = main.ethGetTransactionCount(from, DefaultBlockParameterName.PENDING).send().getTransactionCount();
+        RawTransaction transaction = RawTransaction.createEtherTransaction(nonce, price, gas, to, value);
+        byte[] signed = TransactionEncoder.signMessage(transaction, mainChainId, credentials);
+        EthSendTransaction sent = main.ethSendRawTransaction(Numeric.toHexString(signed)).send();
+        if (sent.hasError()) {
+            throw new IllegalStateException(trim(sent.getError().getMessage()));
+        }
+        plugin.getLogger().info("Cookie payment sent on mainnet " + sent.getTransactionHash() + " from " + from + " to " + to + " value " + format(value));
+        return sent.getTransactionHash();
     }
 }
