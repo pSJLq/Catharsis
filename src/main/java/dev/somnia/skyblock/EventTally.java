@@ -166,7 +166,7 @@ final class EventTally implements Listener {
             r.firstSeen = now;
         }
         r.lastSeen = now;
-        InetAddress ip = p.getAddress() == null ? null : p.getAddress().getAddress();
+        InetAddress ip = RealIp.inet(p);
         if (ip != null && !ip.isLoopbackAddress() && !ip.isSiteLocalAddress() && !ip.isLinkLocalAddress() && !ip.isAnyLocalAddress()) {
             r.ipTag = tag(ip.getHostAddress());
         }

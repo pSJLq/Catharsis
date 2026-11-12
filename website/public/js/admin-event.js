@@ -42,17 +42,14 @@
       + " · tx " + num(d.stats && d.stats.tx) + " · players " + num(d.stats && d.stats.players);
     reviewed.checked = !!d.reviewed;
     var all = d.all || [];
-    var rank = 0;
     rowsEl.innerHTML = all.length ? all.map(function (r) {
-      var counted = !r.dev && !r.dq && (r.levelGained || r.xpGained || r.tx);
-      if (counted) rank++;
       var flags = (r.flags || []).map(function (f) {
         return '<span class="ev-flag">' + esc(f.text) + " (first " + esc(when(f.firstAt)) + (f.max ? ", max " + esc(num(f.max)) : "") + ")</span>";
       }).join("");
-      var review = (r.dev ? "staff account, not ranked" : "") + (r.dq ? '<span class="ev-dq">disqualified ' + esc(when(r.dq.at)) + (r.dq.note ? ": " + esc(r.dq.note) : "") + "</span>" : "")
-        + (flags ? "<b>under review</b>" + flags : (r.dev || r.dq ? "" : "ok"));
+      var review = (r.dev ? "staff account, not ranked" : r.excluded ? "excluded wallet, not ranked" : "") + (r.dq ? '<span class="ev-dq">disqualified ' + esc(when(r.dq.at)) + (r.dq.note ? ": " + esc(r.dq.note) : "") + "</span>" : "")
+        + (flags ? "<b>under review</b>" + flags : (r.dev || r.excluded || r.dq ? "" : "ok"));
       var btn = r.dev ? "" : '<button type="button" data-dq="' + esc(r.uuid) + '" data-on="' + (r.dq ? "0" : "1") + '">' + (r.dq ? "Restore" : "Disqualify") + "</button>";
-      return "<tr><td>" + (counted ? rank : "-") + "</td><td>" + esc(r.name) + "</td><td>+" + num(r.levelGained) + "</td><td>+" + num(r.xpGained)
+      return "<tr><td>" + (r.rank ? r.rank : "-") + "</td><td>" + esc(r.name) + "</td><td>+" + num(r.xpGained) + "</td><td>+" + num(r.levelGained)
         + "</td><td>" + num(r.tx) + "</td><td>" + review + "</td><td>" + btn + "</td></tr>";
     }).join("") : '<tr><td colspan="7">No players yet.</td></tr>';
   }

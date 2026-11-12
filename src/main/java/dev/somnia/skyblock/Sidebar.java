@@ -227,10 +227,11 @@ final class Sidebar {
         arrows.put(id, arrow);
         raw.add(header(arrow));
         if (step == null) {
-            raw.add("§eChampion's path");
+            raw.add("§eMore quests SOON");
         } else {
             String title = step.title();
-            String progress = " §7(" + quests.progress(profile) + ")";
+            String suffix = quests.progressSuffix(profile);
+            String progress = suffix.isEmpty() ? "" : " §7" + suffix.trim();
             if (title.length() > WRAP) {
                 int cut = title.lastIndexOf(' ', WRAP);
                 cut = cut <= 0 ? WRAP : cut;
@@ -240,7 +241,9 @@ final class Sidebar {
                 raw.add("§e" + title + progress);
             } else {
                 raw.add("§e" + title);
-                raw.add(progress.trim());
+                if (!progress.isEmpty()) {
+                    raw.add(progress.trim());
+                }
             }
         }
         raw.add("");
@@ -304,7 +307,7 @@ final class Sidebar {
         float progress = Math.max(0f, Math.min(1f, profile.questProgress / (float) Math.max(1, step.goal())));
         Component name = Component.text("Objective: ", NamedTextColor.WHITE)
                 .append(Component.text(step.title(), NamedTextColor.YELLOW))
-                .append(Component.text(" (" + quests.progress(profile) + ")", NamedTextColor.GRAY));
+                .append(Component.text(quests.progressSuffix(profile), NamedTextColor.GRAY));
         BossBar bar = bars.get(id);
         if (bar == null) {
             bar = BossBar.bossBar(name, progress, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS);

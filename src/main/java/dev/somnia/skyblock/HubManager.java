@@ -720,7 +720,10 @@ final class HubManager implements Listener {
         switch (name) {
             case "Bazaar Broker" -> plugin.market().openBazaar(player);
             case "Auctioneer" -> plugin.market().openAuctions(player);
-            case "Banker", "Archivist" -> plugin.market().openBank(player);
+            case "Banker", "Archivist" -> {
+                plugin.quests().hit(player, "talk_bank", 1);
+                plugin.market().openBank(player);
+            }
             case "Arena Warden" -> {
                 if (npc.warp()) {
                     toColosseum(player);
@@ -749,7 +752,10 @@ final class HubManager implements Listener {
         switch (npc.kind()) {
             case "bazaar" -> plugin.market().openBazaar(player);
             case "auction" -> plugin.market().openAuctions(player);
-            case "bank" -> plugin.market().openBank(player);
+            case "bank" -> {
+                plugin.quests().hit(player, "talk_bank", 1);
+                plugin.market().openBank(player);
+            }
             case "blacksmith" -> plugin.market().openShop(player);
             case "merchant" -> plugin.market().openMerchant(player, npc.name());
             case "island" -> {
@@ -780,19 +786,20 @@ final class HubManager implements Listener {
         Runnable after = null;
         if (step != null && step.event().equals("talk_quest")) {
             lines = List.of("Welcome to " + name("plaza") + ", traveler!",
-                    "Every Lumenholder starts small: a few crops, a little ore, a stack of logs.",
-                    "Goldmeadow, " + name("mine") + " and Elderglade all grow back what you take.",
+                    "Everyone here started small: a stack of logs, a few crops, a little ore.",
+                    name("forest") + ", " + name("farm") + " and " + name("mine") + " all grow back what you take.",
                     "Work the land for me and I'll make it worth your while.");
             after = () -> plugin.quests().hit(player, "talk_quest", 1);
         } else if (step != null && at < meet) {
             lines = List.of("Ah, a fresh face! Your island needs you first.",
                     "Finish what Wren asked: " + step.title() + ".");
         } else if (step != null) {
-            lines = List.of("Your task: " + step.title() + " (" + plugin.quests().progress(profile) + ").",
+            lines = List.of("Your task: " + step.title() + plugin.quests().progressSuffix(profile) + ".",
                     step.hint(),
                     "Come back any time. /quest shows the whole path.");
         } else {
-            lines = List.of("You have done everything I asked. Lumenhold is lucky to have you!");
+            lines = List.of("You have done everything I asked. " + name("plaza") + " is lucky to have you!",
+                    "More quests SOON. If you enjoy the server, donations keep it running: " + Quests.DONATE);
         }
         Chat.npc(plugin, player, npc.name(), lines, after);
     }
@@ -1504,6 +1511,7 @@ final class HubManager implements Listener {
         boolean combat = "combat".equals(here[2]);
         plugin.chat().discovered(player, plugin.profiles().get(player.getUniqueId()), id, here[1], combat);
         Profile profile = plugin.profiles().get(player.getUniqueId());
+        plugin.quests().hit(player, "discover", Quests.explored(profile));
         plugin.sidebar().show(player, profile);
         if ("mine".equals(id) && !profile.seenCoal) {
             profile.seenCoal = true;

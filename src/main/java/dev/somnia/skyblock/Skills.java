@@ -171,7 +171,7 @@ final class Skills implements Listener {
         for (Collects.Entry entry : Collects.ENTRIES) {
             xp += 4 * ProgressMath.tier(Collects.amount(p, entry));
         }
-        xp += Quests.SKYBLOCK_XP * p.questStep;
+        xp += Quests.SKYBLOCK_XP * Quests.completed(p);
         for (String key : p.discovered) {
             if (!key.contains(":")) {
                 xp += 5;
@@ -318,6 +318,7 @@ final class Skills implements Listener {
         Player player = event.getPlayer();
         Material caught = event.getCaught() instanceof Item item ? item.getItemStack().getType() : null;
         add(player, Skill.FISHING, fishingXp(caught));
+        plugin.quests().hit(player, "fish", 1);
         long coins = 3 + java.util.concurrent.ThreadLocalRandom.current().nextInt(6);
         plugin.stats().addCoins(player, coins);
         if (event.getCaught() instanceof Item item) {
@@ -346,6 +347,9 @@ final class Skills implements Listener {
     public void onCraft(CraftItemEvent event) {
         if (event.getWhoClicked() instanceof Player player && event.getRecipe() != null) {
             add(player, Skill.CARPENTRY, 2L * Math.max(1, event.getRecipe().getResult().getAmount()));
+            if (event.getRecipe().getResult().getType().name().endsWith("_PICKAXE")) {
+                plugin.quests().hit(player, "craft_pickaxe", 1);
+            }
         }
     }
 }

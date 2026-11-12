@@ -38,6 +38,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     private SbAdmin admin;
     private Auth auth;
     private EventTally tally;
+    private RealIp realIp;
 
     Auth auth() {
         return auth;
@@ -46,6 +47,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        realIp = new RealIp(this);
         auth = new Auth(this);
         profiles = new ProfileStore(this);
         auth.migrateAll();
@@ -80,6 +82,7 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         market = new Market(this);
         marketGui = new MarketGui(this);
         quests = new Quests(this);
+        getServer().getPluginManager().registerEvents(quests, this);
         sidebar.quests(quests);
         skills = new Skills(this);
         skillChain = new SkillChain(this);
@@ -162,6 +165,8 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
             getServer().getScheduler().runTaskLater(this, this::startWorld, 10L);
             return;
         }
+        realIp.bind();
+        getServer().getScheduler().runTaskTimer(this, () -> RealIp.purge(getServer().getOnlinePlayers()), 1200L, 1200L);
         auth.start();
         islands.load();
         hub.load();

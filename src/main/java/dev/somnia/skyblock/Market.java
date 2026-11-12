@@ -845,7 +845,12 @@ final class Market implements Listener {
         giveOrStash(player.getUniqueId(), recipe.result(), recipe.qty(), true);
         player.sendMessage(Component.text("Forged " + label(recipe.result()) + "!", NamedTextColor.GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.8f, 1f);
-        plugin.quests().hit(player, "forge", 1);
+        String forged = recipe.result();
+        if (forged.endsWith("_helmet") || forged.endsWith("_chestplate") || forged.endsWith("_leggings") || forged.endsWith("_boots")) {
+            plugin.quests().hit(player, "forge_armor", 1);
+        } else if (forged.endsWith("_sword") || forged.endsWith("_blade") || forged.endsWith("cleaver")) {
+            plugin.quests().hit(player, "forge_sword", 1);
+        }
     }
 
     // ---------- Bazaar ----------

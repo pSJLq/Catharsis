@@ -1,21 +1,55 @@
 package dev.somnia.skyblock;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.function.UnaryOperator;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * The intro quest line, given by Wren on the island and the Quest Giver in Lumenhold:
- * island basics → the hub resource zones → selling → combat → gear → bazaar and auctions.
- * Each finished step is worth 5 SkyBlock XP (Skills.skyblockXp counts questStep) plus the listed reward.
- * Skill XP rewards go through Skills.add, so they are queued in the same onchain SkySkills batch as any other XP.
+ * The intro quest line (v2), given by Wren on the island and the Quest Giver in the hub. It follows the order of the
+ * wiki's starter quests: your island by hand (log, crafting, a wooden pickaxe, cobblestone, a minion), then the hub
+ * (logs, crops, selling, ore, the Banker and your purse), then combat (a sword, the undead, armor, skills that give
+ * Health/Defense/Strength, a practice Colosseum wave, the wolves), then trading (Bazaar, Auction House) and exploring.
+ *
+ * Every finished step is worth 5 SkyBlock XP (wiki SkyBlock Levels: +5 per objective); Skills.skyblockXp counts
+ * {@link #completed(Profile)}. Extra coin/skill rewards are only the wiki numbers of the matching starter quest
+ * (Foraging Tutorial 1000 coins + 100 Foraging, First Harvest 10 Farming, Time to Mine 20 Mining, Time to Strike
+ * 100 coins + 15 Combat, Fishing Tutorial 1000 coins + 10 Fishing and a rod, Explorer 50 coins). Skill XP rewards
+ * go through Skills.add, so they are queued in the same onchain SkySkills batch as any other XP.
+ *
+ * Zone names in titles and hints are written as {id} and resolved from the hub's zone names at display time.
+ *
+ * Migration from v1 (15 steps, linear questStep): every v1 step a player finished stays finished. The player
+ * resumes at the first v2 step they have not done; finished v1 steps that come later in the v2 order are kept in
+ * Profile.questSkip and complete by themselves (no second reward) when the line reaches them. SkyBlock XP from
+ * quests = 5 x (questStep + questSkip.size()), which right after migration equals the old 5 x questStep.
  */
-final class Quests {
+final class Quests implements Listener {
     record Step(String event, int goal, long coins, Skills.Skill skill, long xp, String title, String hint) {
+        @Override
+        public String title() {
+            return names(title);
+        }
+
+        @Override
+        public String hint() {
+            return names(hint);
+        }
+
         String rewardText() {
             StringBuilder b = new StringBuilder("+" + SKYBLOCK_XP + " SkyBlock XP");
             if (skill != null && xp > 0) {
@@ -24,35 +58,148 @@ final class Quests {
             if (coins > 0) {
                 b.append(", +").append(coins).append(" Coins");
             }
+            if (event.equals("fish")) {
+                b.append(", Fishing Rod");
+            }
             return b.toString();
         }
     }
 
     /** Wiki SkyBlock Levels: +5 SkyBlock XP per objective completed. */
     static final int SKYBLOCK_XP = 5;
+    static final int VERSION = 2;
+    /** Same address as the website footer's Donate button. */
+    static final String DONATE = "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D";
+    /** Hub districts counted by the exploring step. */
+    static final List<String> DISTRICTS = List.of("plaza", "relics", "colosseum", "farm", "mine", "barrows",
+            "spire", "ruins", "forest", "mountain", "lake", "wharf");
 
     static final List<Step> STEPS = List.of(
-            new Step("talk_wren", 1, 25, null, 0, "Talk to Wren, your Island Guide", "Wren stands next to your island spawn. Click her."),
-            new Step("island_oak", 5, 0, Skills.Skill.FORAGING, 30, "Chop 5 Oak Logs on your island", "Hit the tree on your island with the axe from the starter chest."),
-            new Step("island_cobble", 10, 0, Skills.Skill.MINING, 30, "Mine 10 Cobblestone", "Your cobblestone generator regrows every block you mine."),
-            new Step("talk_quest", 1, 50, null, 0, "Meet the Quest Giver in Lumenhold", "Take the island portal or type /hub. The Quest Giver waits south of the fountain."),
-            new Step("hub_crop", 10, 0, Skills.Skill.FARMING, 100, "Harvest 10 crops in Goldmeadow", "Ripe wheat, carrots, potatoes, melons, pumpkins and sugar cane all count. They grow back."),
-            new Step("hub_ore", 10, 0, Skills.Skill.MINING, 100, "Mine 10 ore in Darkvein Mine", "Coal needs any pickaxe, iron and lapis a stone pick. Mined ore and stone become bedrock at once and grow back after a while."),
-            new Step("hub_log", 10, 0, Skills.Skill.FORAGING, 100, "Chop 10 logs in Elderglade", "Chopped trees disappear completely and grow back a little later."),
-            new Step("sell", 1, 100, null, 0, "Sell something to a Merchant", "Any merchant NPC buys your items for coins."),
-            new Step("kill_graveyard", 10, 0, Skills.Skill.COMBAT, 150, "Slay 10 undead in Dusk Thicket", "The undead roam the dark woods. More of them come out at night."),
-            new Step("forge", 1, 100, null, 0, "Forge gear at the Blacksmith", "The Blacksmith in Lumenhold forges swords and armor for coins and drops."),
-            new Step("level", 3, 200, null, 0, "Reach Combat 3", "Every mob you slay gives Combat XP."),
-            new Step("kill_ruins", 5, 0, Skills.Skill.COMBAT, 200, "Hunt 5 beasts in Greyfang Citadel", "Wolves and bone archers guard the ruined citadel."),
-            new Step("bazaar", 1, 200, null, 0, "Make your first Bazaar trade", "Place a sell offer or buy order, or fill one. /bz"),
-            new Step("auction", 1, 200, null, 0, "List or bid on an auction", "Hold an item: /ah sell <start stt> [minutes]. Or bid in /ah."),
-            new Step("level_farming", 5, 500, null, 0, "Reach Farming 5", "Harvest crops in Goldmeadow and wheat on your island.")
+            new Step("talk_wren", 1, 0, null, 0, "Talk to Wren, your Island Guide",
+                    "Wren stands next to your island spawn. Click her."),
+            new Step("island_oak", 5, 0, null, 0, "Punch 5 Oak Logs off your tree",
+                    "No axe yet: hold left click on the tree on your island. The logs go to your inventory."),
+            new Step("open_menu", 1, 0, null, 0, "Open your SkyBlock Menu",
+                    "Right-click the Nether Star in the last hotbar slot."),
+            new Step("craft_pickaxe", 1, 0, null, 0, "Craft a Wooden Pickaxe",
+                    "SkyBlock Menu > Crafting Table. Logs make planks, planks make sticks; 3 planks over 2 sticks make the pickaxe."),
+            new Step("island_cobble", 10, 0, null, 0, "Mine 10 Cobblestone",
+                    "Use your new pickaxe on the cobblestone generator. It regrows every block you mine."),
+            new Step("place_minion", 1, 0, null, 0, "Place your Cobblestone Minion",
+                    "On your island, look at a block with two free blocks above it and type /minion place."),
+            new Step("talk_quest", 1, 0, null, 0, "Meet the Quest Giver in {plaza}",
+                    "Take the island portal or type /hub. The Quest Giver waits south of the fountain."),
+            new Step("hub_log", 20, 1000, Skills.Skill.FORAGING, 100, "Chop 20 logs in {forest}",
+                    "Any log counts. Chopped trees grow back a little later. An axe from the Blacksmith or Woodward Fenn is faster."),
+            new Step("hub_crop", 10, 0, Skills.Skill.FARMING, 10, "Harvest 10 crops in {farm}",
+                    "Only ripe crops count: wheat, carrots, potatoes, melons, pumpkins and sugar cane. They grow back."),
+            new Step("sell", 1, 0, null, 0, "Sell something to a Merchant",
+                    "Merchant NPCs buy your logs, crops, ore and drops for coins."),
+            new Step("hub_ore", 10, 0, Skills.Skill.MINING, 20, "Mine 10 ore in {mine}",
+                    "Coal needs any pickaxe, iron and lapis a stone pickaxe. Mined ore grows back after a while."),
+            new Step("talk_bank", 1, 0, null, 0, "Visit the Banker",
+                    "The Banker shows your purse and the Relic Pool. Onchain actions pay a little STT gas from your purse; /deposit shows its address."),
+            new Step("forge_sword", 1, 0, null, 0, "Forge a sword at the Blacksmith",
+                    "Don't fight bare-handed. The Undead Sword costs 150 coins at the Blacksmith in {plaza}."),
+            new Step("kill_graveyard", 10, 100, Skills.Skill.COMBAT, 15, "Slay 10 undead in {barrows}",
+                    "The undead roam the dark woods. More of them come out at night. Keep the Rotten Flesh."),
+            new Step("forge_armor", 1, 0, null, 0, "Forge a piece of armor",
+                    "The Blacksmith makes Graveyard armor from coins and Rotten Flesh. Armor gives Defense."),
+            new Step("fish", 1, 1000, Skills.Skill.FISHING, 10, "Catch a fish",
+                    "You got a Fishing Rod. Cast it into any water, {wharf} is the classic spot. Fishing gives Health."),
+            new Step("level", 3, 0, null, 0, "Reach Combat 3",
+                    "Every mob you slay gives Combat XP. Farming and Fishing add Health, Mining Defense, Foraging Strength."),
+            new Step("wave", 1, 0, null, 0, "Clear a wave in the {colosseum}",
+                    "Talk to the Arena Warden and start a practice run. Practice needs no STT."),
+            new Step("kill_ruins", 5, 0, null, 0, "Hunt 5 beasts in {ruins}",
+                    "Wolves and bone archers guard the ruins and hit hard. Come with a sword, armor and some skill levels."),
+            new Step("bazaar", 1, 0, null, 0, "Make your first Bazaar trade",
+                    "/bz: place a sell offer or a buy order, or fill one. Trades are onchain: your purse pays the STT gas, and at 0 STT the trade rolls back. /deposit"),
+            new Step("auction", 1, 0, null, 0, "List or bid on an auction",
+                    "Hold an item: /ah sell <start stt> [minutes], or bid in /ah. Bids, fees and gas come from your purse STT. /deposit"),
+            new Step("level_farming", 5, 0, null, 0, "Reach Farming 5",
+                    "Harvest crops in {farm} and wheat on your island."),
+            new Step("discover", DISTRICTS.size(), 50, null, 0, "Discover every hub district",
+                    "Walk into every district of the hub: farm, mine, woods, ruins, mountain, lake, wharf and more. /warp helps.")
     );
+
+    /** The v1 line, for migrating saved progress. */
+    private static final List<String> V1 = List.of("talk_wren", "island_oak", "island_cobble", "talk_quest", "hub_crop",
+            "hub_ore", "hub_log", "sell", "kill_graveyard", "forge", "level", "kill_ruins", "bazaar", "auction", "level_farming");
+
+    private static final Pattern TOKEN = Pattern.compile("\\{([a-z_]+)}");
+    private static volatile UnaryOperator<String> zoneName = Zones::fallbackName;
+
+    static String names(String text) {
+        if (text == null || text.indexOf('{') < 0) {
+            return text;
+        }
+        Matcher m = TOKEN.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String name;
+            try {
+                name = zoneName.apply(m.group(1));
+            } catch (RuntimeException e) {
+                name = Zones.fallbackName(m.group(1));
+            }
+            m.appendReplacement(out, Matcher.quoteReplacement(name == null ? m.group(1) : name));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
 
     private final SomniaSkyblockPlugin plugin;
 
     Quests(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
+        zoneName = id -> plugin.hub() == null ? Zones.fallbackName(id) : plugin.hub().name(id);
+    }
+
+    /** Steps finished: the ones behind questStep plus v1 steps already done further down the line. */
+    static int completed(Profile profile) {
+        return Math.min(STEPS.size(), profile.questStep + profile.questSkip.size());
+    }
+
+    static boolean done(Profile profile, int index) {
+        return index < profile.questStep || (index < STEPS.size() && profile.questSkip.contains(STEPS.get(index).event()));
+    }
+
+    /**
+     * v1 -> v2. Returns true when the profile changed. Pure (no Player), safe to run while loading.
+     */
+    static boolean migrate(Profile profile) {
+        if (profile.questVersion >= VERSION) {
+            return false;
+        }
+        int oldStep = Math.max(0, Math.min(profile.questStep, V1.size()));
+        int oldProgress = profile.questProgress;
+        String oldCurrent = oldStep < V1.size() ? V1.get(oldStep) : null;
+        Set<String> doneV2 = new java.util.HashSet<>();
+        for (int i = 0; i < oldStep; i++) {
+            String e = V1.get(i);
+            if (e.equals("forge")) {
+                doneV2.add("forge_sword");
+                doneV2.add("forge_armor");
+            } else {
+                doneV2.add(e);
+            }
+        }
+        int at = 0;
+        while (at < STEPS.size() && doneV2.contains(STEPS.get(at).event())) {
+            at++;
+        }
+        profile.questSkip.clear();
+        for (int i = at + 1; i < STEPS.size(); i++) {
+            if (doneV2.contains(STEPS.get(i).event())) {
+                profile.questSkip.add(STEPS.get(i).event());
+            }
+        }
+        profile.questStep = at;
+        boolean same = at < STEPS.size() && oldCurrent != null && STEPS.get(at).event().equals(oldCurrent);
+        profile.questProgress = same ? oldProgress : 0;
+        profile.questVersion = VERSION;
+        return true;
     }
 
     Step current(Profile profile) {
@@ -71,7 +218,7 @@ final class Quests {
     String sidebarLine(Profile profile) {
         Step step = current(profile);
         if (step == null) {
-            return "Quest: Champion's path";
+            return "More quests SOON";
         }
         String text = step.title();
         if (text.length() > 26) {
@@ -80,12 +227,23 @@ final class Quests {
         return text;
     }
 
+    /** "3/10" for counted steps; empty for single-action steps (talk, craft, place...). */
     String progress(Profile profile) {
         Step step = current(profile);
-        if (step == null) {
+        if (step == null || step.goal() <= 1) {
             return "";
         }
         return Math.min(profile.questProgress, step.goal()) + "/" + step.goal();
+    }
+
+    /** " (3/10)" or "" — for callers that append the progress to a title. */
+    String progressSuffix(Profile profile) {
+        String p = progress(profile);
+        return p.isEmpty() ? "" : " (" + p + ")";
+    }
+
+    private static boolean maxType(String event) {
+        return event.equals("level") || event.equals("wave") || event.startsWith("level_") || event.equals("discover");
     }
 
     void hit(Player player, String event, int amount) {
@@ -94,7 +252,7 @@ final class Quests {
         if (step == null || !step.event().equals(event)) {
             return;
         }
-        if (event.equals("level") || event.equals("wave") || event.startsWith("level_")) {
+        if (maxType(event)) {
             profile.questProgress = Math.max(profile.questProgress, amount);
         } else {
             profile.questProgress += amount;
@@ -105,6 +263,7 @@ final class Quests {
         }
         profile.questStep++;
         profile.questProgress = 0;
+        skipDone(profile);
         plugin.profiles().save(profile);
         Step next = current(profile);
         announce(player, step, next);
@@ -116,17 +275,108 @@ final class Quests {
             plugin.skills().add(player, step.skill(), step.xp());
         }
         plugin.getLogger().info("Quest step done for " + player.getName() + ": " + step.event() + " (" + step.rewardText() + ")");
-        if (next != null && current(profile) == next) {
-            if (next.event().equals("level")) {
-                hit(player, "level", Stats.combatLevel(profile.combatXp));
-            } else if (next.event().startsWith("level_")) {
-                for (Skills.Skill skill : Skills.Skill.values()) {
-                    if (next.event().equals("level_" + skill.name().toLowerCase(java.util.Locale.ROOT))) {
-                        hit(player, next.event(), Skills.level(profile, skill));
+        if (next != null) {
+            started(player, profile, next);
+        }
+    }
+
+    /** Steps the player already finished in the v1 line complete silently when reached (no second reward). */
+    static void skipDone(Profile profile) {
+        while (profile.questStep < STEPS.size() && profile.questSkip.remove(STEPS.get(profile.questStep).event())) {
+            profile.questStep++;
+            profile.questProgress = 0;
+        }
+    }
+
+    /** A step became current: hand out its tool and complete it at once if it is already true. */
+    private void started(Player player, Profile profile, Step next) {
+        if (current(profile) != next) {
+            return;
+        }
+        if (next.event().equals("fish")) {
+            giveRod(player);
+        }
+        int have = already(player, profile, next.event());
+        if (have > 0) {
+            hit(player, next.event(), have);
+        }
+    }
+
+    /** How much of a step is already true right now (levels, areas found, a pickaxe owned, a minion placed). */
+    private int already(Player player, Profile profile, String event) {
+        switch (event) {
+            case "level":
+                return Stats.combatLevel(profile.combatXp);
+            case "discover":
+                return explored(profile);
+            case "craft_pickaxe":
+                for (ItemStack item : player.getInventory().getContents()) {
+                    if (item != null && item.getType().name().endsWith("_PICKAXE")) {
+                        return 1;
                     }
                 }
+                return 0;
+            case "place_minion":
+                return plugin.minions() != null && plugin.minions().countOn(profile) > 0 ? 1 : 0;
+            default:
+                if (event.startsWith("level_")) {
+                    for (Skills.Skill skill : Skills.Skill.values()) {
+                        if (event.equals("level_" + skill.name().toLowerCase(Locale.ROOT))) {
+                            return Skills.level(profile, skill);
+                        }
+                    }
+                }
+                return 0;
+        }
+    }
+
+    static int explored(Profile profile) {
+        int n = 0;
+        for (String id : DISTRICTS) {
+            if (profile.discovered.contains(id)) {
+                n++;
             }
         }
+        return n;
+    }
+
+    /** On login: skip finished v1 steps, give the rod if the fishing step is current, apply what is already true. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onLogin(SbLoginEvent event) {
+        Player player = event.getPlayer();
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            Profile profile = plugin.profiles().get(player.getUniqueId());
+            int before = profile.questStep;
+            skipDone(profile);
+            if (profile.questStep != before) {
+                plugin.profiles().save(profile);
+            }
+            Step step = current(profile);
+            if (step != null) {
+                if (step.event().equals("fish") && !hasRod(player)) {
+                    giveRod(player);
+                }
+                int have = already(player, profile, step.event());
+                if (have > 0) {
+                    hit(player, step.event(), have);
+                }
+            }
+        }, 60L);
+    }
+
+    private static boolean hasRod(Player player) {
+        return player.getInventory().contains(Material.FISHING_ROD);
+    }
+
+    private void giveRod(Player player) {
+        if (hasRod(player)) {
+            return;
+        }
+        plugin.market().giveOrStash(player.getUniqueId(), "minecraft:fishing_rod", 1, false);
+        player.sendMessage(Component.text("You received a Fishing Rod.", NamedTextColor.GREEN));
     }
 
     /** OBJECTIVE COMPLETE / REWARDS / NEW OBJECTIVE chat block. */
@@ -150,21 +400,36 @@ final class Quests {
             player.sendMessage(Component.text("  " + next.title(), NamedTextColor.WHITE));
             player.sendMessage(Component.text("  " + next.hint(), NamedTextColor.GRAY));
         } else {
-            player.sendMessage(Component.text("  You finished the intro path. Keep leveling your skills and collections!", NamedTextColor.LIGHT_PURPLE));
+            finale(player);
         }
         player.sendMessage(Component.empty());
         player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 0.8f, 1.1f);
     }
 
+    /** End of the line: more quests SOON, and the donation address from the website footer. */
+    static void finale(Player player) {
+        player.sendMessage(Component.text("  You finished every quest we have so far. More quests SOON!", NamedTextColor.LIGHT_PURPLE));
+        player.sendMessage(Component.text("  Enjoying the server? Donations keep it running:", NamedTextColor.GRAY));
+        player.sendMessage(Component.text("  " + DONATE, NamedTextColor.AQUA)
+                .clickEvent(ClickEvent.copyToClipboard(DONATE)));
+    }
+
     void show(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
-        player.sendMessage(Component.text("—— Quests ——", NamedTextColor.GOLD));
+        player.sendMessage(Component.text("—— Quests (" + completed(profile) + "/" + STEPS.size() + ") ——", NamedTextColor.GOLD));
         for (int i = 0; i < STEPS.size(); i++) {
             Step step = STEPS.get(i);
-            NamedTextColor color = i < profile.questStep ? NamedTextColor.GREEN : i == profile.questStep ? NamedTextColor.YELLOW : NamedTextColor.DARK_GRAY;
-            String mark = i < profile.questStep ? "✔ " : i == profile.questStep ? "➜ " : "· ";
-            String extra = i == profile.questStep ? " (" + progress(profile) + ") — " + step.hint() : "";
+            boolean done = done(profile, i);
+            boolean now = i == profile.questStep;
+            NamedTextColor color = done ? NamedTextColor.GREEN : now ? NamedTextColor.YELLOW : NamedTextColor.DARK_GRAY;
+            String mark = done ? "✔ " : now ? "➜ " : "· ";
+            String extra = now ? progressSuffix(profile) + " — " + step.hint() : "";
             player.sendMessage(Component.text(mark + step.title() + "  " + step.rewardText() + extra, color));
+        }
+        if (current(profile) == null) {
+            finale(player);
+        } else if (current(profile).event().equals("fish") && !hasRod(player)) {
+            giveRod(player);
         }
     }
 }

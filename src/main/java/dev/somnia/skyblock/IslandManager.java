@@ -147,6 +147,8 @@ final class IslandManager {
             p.lastCheckpoint = 0;
             p.questStep = 0;
             p.questProgress = 0;
+            p.questSkip.clear();
+            p.questVersion = Quests.VERSION;
             p.discovered.clear();
             p.seenHub = false;
             p.seenCoal = false;
@@ -261,8 +263,8 @@ final class IslandManager {
         if (template != null && !template.tips.isEmpty()) {
             return template.tips;
         }
-        return java.util.List.of("The cobble machine regrows the framed cobblestone. Mine it with the wooden pick.",
-                "The starter chest has your tools. The portal goes to the hub. /hub and /is.",
+        return java.util.List.of("The cobble machine regrows the framed cobblestone. Mine it with a pickaxe you craft.",
+                "The starter chest has blocks and buckets; craft your tools from the tree's logs. The portal goes to the hub. /hub and /is.",
                 "Place your minion with /minion place. Coal is first; a stone pick reaches the iron.");
     }
 

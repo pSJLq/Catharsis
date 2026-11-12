@@ -45,3 +45,12 @@ dev-accounts: []
 event-excluded-wallets:
   - '0x2Ba34FC1479d17A7B1F6539b73D624d4143b848E'
   - '0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6'
+# Real player IP behind a reverse proxy (Caddy on the VDS). X-Real-IP / the last X-Forwarded-For hop of the
+# browser client's WebSocket upgrade is used only when the connection comes from one of these addresses.
+# Direct connections (no proxy) always use the socket address. Per-IP rules (accounts per IP, login lockout,
+# the event's shared-IP flag) use the result.
+network:
+  trusted-proxies:
+    - 127.0.0.1
+    - ::1
+  log-real-ip: true  # one log line per proxied connection: real IP and proxy socket

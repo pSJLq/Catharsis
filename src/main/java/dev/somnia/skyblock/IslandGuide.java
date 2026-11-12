@@ -227,17 +227,19 @@ final class IslandGuide implements Listener {
             lines = java.util.List.of(
                     "Welcome to your Private Island!",
                     "This little rock is all yours. Everything you gather is written to your purse onchain.",
-                    "The starter chest has your tools. Chop the tree and mine the cobblestone generator.",
+                    "The starter chest has blocks and buckets, but no tools: you make those yourself.",
+                    "Punch the tree for logs, then craft a wooden pickaxe from your SkyBlock Menu.",
                     "When you are ready, the portal takes you to " + plugin.hub().name("plaza") + ".");
             after = () -> plugin.quests().hit(player, "talk_wren", 1);
         } else if (step != null && Quests.STEPS.indexOf(step) < Quests.indexOf("talk_quest")) {
-            lines = java.util.List.of("Keep going! " + step.title() + " (" + plugin.quests().progress(profile) + ").", step.hint());
+            lines = java.util.List.of("Keep going! " + step.title() + plugin.quests().progressSuffix(profile) + ".", step.hint());
         } else if (step != null) {
             lines = java.util.List.of("Your island is coming along nicely.",
                     "Your next task: " + step.title() + ".",
                     "The portal or /hub takes you to " + plugin.hub().name("plaza") + ".");
         } else {
-            lines = java.util.List.of("You have done everything I can teach. Grow your island and your skills!");
+            lines = java.util.List.of("You have done everything I can teach. Grow your island and your skills!",
+                    "More quests SOON.");
         }
         Chat.npc(plugin, player, "Wren", lines, after);
     }

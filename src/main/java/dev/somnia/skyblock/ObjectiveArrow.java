@@ -67,7 +67,10 @@ final class ObjectiveArrow {
             case "hub_log" -> inHub ? plugin.hub().warpPoint("forest") : null;
             case "kill_graveyard" -> inHub ? plugin.hub().warpPoint("barrows") : null;
             case "kill_ruins" -> inHub ? plugin.hub().warpPoint("ruins") : null;
-            case "forge" -> inHub ? plugin.hub().npcNear(player, "blacksmith") : null;
+            case "forge_sword", "forge_armor" -> inHub ? plugin.hub().npcNear(player, "blacksmith") : null;
+            case "talk_bank" -> inHub ? plugin.hub().npcNear(player, "bank") : null;
+            case "fish" -> inHub ? plugin.hub().warpPoint("wharf") : null;
+            case "wave" -> inHub ? plugin.hub().warpPoint("colosseum") : null;
             case "sell" -> inHub ? plugin.hub().npcNear(player, "merchant") : null;
             case "bazaar" -> inHub ? plugin.hub().npcNear(player, "bazaar") : null;
             case "auction" -> inHub ? plugin.hub().npcNear(player, "auction") : null;

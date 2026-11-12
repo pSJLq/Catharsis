@@ -48,6 +48,10 @@ final class Profile {
     int lastCheckpoint;
     int questStep;
     int questProgress;
+    /** Quest line version of questStep (Quests.VERSION); files without it hold v1 progress. */
+    int questVersion = Quests.VERSION;
+    /** v1 steps already finished that lie further down the v2 line; they complete silently when reached. */
+    final java.util.Set<String> questSkip = new java.util.LinkedHashSet<>();
     long fishingXp;
     /** Leftover tenths of skill XP per Skills.Skill ordinal (pumpkin +4.5); never sent onchain until they add up to 1. */
     final int[] xpTenths = new int[7];

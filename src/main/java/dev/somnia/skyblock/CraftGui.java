@@ -520,6 +520,9 @@ final class CraftGui implements Listener {
             }
             if (ok) {
                 plugin.skills().add(online, Skills.Skill.CARPENTRY, 2L * amount);
+                if (result.getType().name().endsWith("_PICKAXE")) {
+                    plugin.quests().hit(online, "craft_pickaxe", 1);
+                }
             } else {
                 if (online.getOpenInventory().getTopInventory().getHolder() instanceof View open && open == view) {
                     restoreGrid(open, beforeGrid);

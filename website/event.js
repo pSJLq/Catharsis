@@ -37,7 +37,7 @@ let board = null;
 let boardMtime = 0;
 
 function blank() {
-  return { start: 0, end: 0, stoppedAt: 0, reviewed: false, baseline: null, last: null, flags: {}, dq: {} };
+  return { start: 0, end: 0, stoppedAt: 0, reviewed: false, baseline: null, last: null, flags: {}, dq: {}, reach: {} };
 }
 
 function load() {
@@ -151,9 +151,15 @@ function standings(b) {
     const lv = Math.max(0, (p.level || 0) - from.level);
     const tx = Math.max(0, (p.tx || 0) - from.tx);
     if (xp === 0 && lv === 0 && tx === 0) continue;
-    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, excluded, level: p.level || 0, levelGained: lv, xpGained: xp, tx, txBy: diffBy(p.txBy, from.txBy) });
+    // Tie-break: who reached this XP total first. Stamped with the server snapshot time (every 30 s) the
+    // first time the total is seen; it moves only when the total changes.
+    const reach = state.reach || (state.reach = {});
+    const seen = reach[p.uuid];
+    if (!seen || seen.xp !== xp) reach[p.uuid] = { xp, at: b.at || Date.now() };
+    rows.push({ uuid: p.uuid, name: p.name || '?', dev: !!p.dev, excluded, level: p.level || 0, levelGained: lv, xpGained: xp, reachedAt: reach[p.uuid].at, tx, txBy: diffBy(p.txBy, from.txBy) });
   }
-  rows.sort((a, c) => c.levelGained - a.levelGained || c.xpGained - a.xpGained || c.tx - a.tx || a.name.localeCompare(c.name));
+  // Ranked by SkyBlock XP gained (1 level = 100 XP, so levels would hide up to 99 XP of difference).
+  rows.sort((a, c) => c.xpGained - a.xpGained || a.reachedAt - c.reachedAt || c.tx - a.tx || a.name.localeCompare(c.name));
   return {
     at: b.at,
     rows,
@@ -199,10 +205,15 @@ function json(res, status, body) {
   res.end(raw);
 }
 
+// The public board order; admin rank numbers come from here so both pages always agree.
+function ranked(rows) {
+  return rows.filter((r) => !ineligible(r) && !state.dq[r.uuid]);
+}
+
 function publicView() {
   const now = Date.now();
   const last = state.last || { at: 0, rows: [], stats: { tx: 0, players: 0, txBy: {} } };
-  const rows = last.rows.filter((r) => !ineligible(r) && !state.dq[r.uuid]).slice(0, 100).map((r, i) => ({
+  const rows = ranked(last.rows).slice(0, 100).map((r, i) => ({
     rank: i + 1,
     name: r.name,
     level: r.level,
@@ -228,9 +239,10 @@ function adminView() {
   const view = publicView();
   const last = state.last || { rows: [] };
   const seen = new Set(last.rows.map((r) => r.uuid));
-  const rows = last.rows.map((r) => ({ ...r, flags: state.flags[r.uuid] || [], dq: state.dq[r.uuid] || null }));
+  const rank = new Map(ranked(last.rows).map((r, i) => [r.uuid, i + 1]));
+  const rows = last.rows.map((r) => ({ ...r, rank: rank.get(r.uuid) || 0, flags: state.flags[r.uuid] || [], dq: state.dq[r.uuid] || null }));
   for (const uuid of Object.keys(state.flags)) {
-    if (!seen.has(uuid)) rows.push({ uuid, name: nameOf(uuid), levelGained: 0, xpGained: 0, tx: 0, flags: state.flags[uuid], dq: state.dq[uuid] || null });
+    if (!seen.has(uuid)) rows.push({ uuid, name: nameOf(uuid), rank: 0, levelGained: 0, xpGained: 0, tx: 0, flags: state.flags[uuid], dq: state.dq[uuid] || null });
   }
   return { ...view, all: rows, limits: LIMITS, rules: RULES, baselineAt: state.baseline ? state.baseline.at : 0 };
 }

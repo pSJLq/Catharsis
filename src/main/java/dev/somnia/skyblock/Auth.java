@@ -362,14 +362,14 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
     }
 
     private static String ip(Player player) {
-        return player.getAddress() == null ? "?" : player.getAddress().getAddress().getHostAddress();
+        return RealIp.of(player);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
         long now = System.currentTimeMillis();
         String n = event.getName().toLowerCase(Locale.ROOT);
-        String ip = event.getAddress().getHostAddress();
+        String ip = RealIp.of(event);
         Long until = Math.max(lockedUntil.getOrDefault("n:" + n, 0L), lockedUntil.getOrDefault("i:" + ip, 0L));
         if (until > now) {
             long min = Math.max(1, (until - now + 59_999) / 60_000);

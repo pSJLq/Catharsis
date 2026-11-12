@@ -249,6 +249,7 @@ final class Minions implements Listener, CommandExecutor {
         spawnStand(m, islands);
         player.playSound(player.getLocation(), Sound.BLOCK_STONE_PLACE, 1f, 1f);
         player.sendMessage(Component.text("You placed a Cobblestone Minion " + ProgressMath.numeral(m.tier) + ". It works the 5×5 floor around it.", NamedTextColor.GREEN));
+        plugin.quests().hit(player, "place_minion", 1);
     }
 
     /** Minions this player has placed (anywhere). */

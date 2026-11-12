@@ -404,6 +404,7 @@ final class SbMenu implements Listener, CommandExecutor {
     // ------------------------------------------------------------------ main menu
     void openMain(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
+        plugin.quests().hit(player, "open_menu", 1);
         Stats.Sheet sheet = plugin.stats().sheet(player);
         View view = page("SkyBlock Menu");
         // profile head
@@ -473,7 +474,7 @@ final class SbMenu implements Listener, CommandExecutor {
         Quests.Step step = plugin.quests().current(profile);
         List<Component> ql = new ArrayList<>(wrap("View your active quests, progress, and rewards.", NamedTextColor.GRAY));
         ql.add(Component.empty());
-        ql.add(plain("Completed: ", NamedTextColor.GRAY).append(plain(profile.questStep + "/" + Quests.STEPS.size(), NamedTextColor.YELLOW)));
+        ql.add(plain("Completed: ", NamedTextColor.GRAY).append(plain(Quests.completed(profile) + "/" + Quests.STEPS.size(), NamedTextColor.YELLOW)));
         if (step != null) {
             ql.add(plain("Next: ", NamedTextColor.GRAY).append(plain(step.title(), NamedTextColor.YELLOW)));
         }
@@ -773,7 +774,7 @@ final class SbMenu implements Listener, CommandExecutor {
         View view = page("SkyBlock Leveling");
         int[] skills = coreSkills(profile);
         int[] cols = coreCollections(profile);
-        int story = Quests.SKYBLOCK_XP * profile.questStep;
+        int story = Quests.SKYBLOCK_XP * Quests.completed(profile);
         int storyMax = Quests.SKYBLOCK_XP * Quests.STEPS.size();
         int areas = areasXp(profile);
         int total = skills[1] + cols[1] + storyMax + areas;
@@ -1103,19 +1104,18 @@ final class SbMenu implements Listener, CommandExecutor {
     private void openQuests(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         View view = page("Quest Log");
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
         for (int i = 0; i < Quests.STEPS.size() && i < slots.length; i++) {
             Quests.Step step = Quests.STEPS.get(i);
-            boolean done = i < profile.questStep;
+            boolean done = Quests.done(profile, i);
             boolean now = i == profile.questStep;
             List<Component> lore = new ArrayList<>(wrap(step.hint(), NamedTextColor.GRAY));
             lore.add(Component.empty());
-            if (now) {
+            if (now && step.goal() > 1) {
                 lore.add(plain("Progress: ", NamedTextColor.GRAY).append(plain(Math.min(profile.questProgress, step.goal()) + "/" + step.goal(), NamedTextColor.YELLOW)));
                 lore.add(bar(Math.min(profile.questProgress, step.goal()), step.goal()));
             }
             lore.add(plain("Reward: ", NamedTextColor.GRAY).append(plain(step.rewardText(), NamedTextColor.GOLD)));
-            lore.add(plain("+" + Quests.SKYBLOCK_XP + " SkyBlock XP", NamedTextColor.AQUA));
             Material m = done ? Material.LIME_DYE : now ? Material.WRITABLE_BOOK : Material.GRAY_DYE;
             view.set(slots[i], icon(m, plain((done ? "✔ " : now ? "➜ " : "") + step.title(), done ? NamedTextColor.GREEN : now ? NamedTextColor.YELLOW : NamedTextColor.RED), lore), null);
         }

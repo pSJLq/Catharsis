@@ -35,8 +35,8 @@
     var rows = data.rows || [];
     $("[data-ev-rows]").innerHTML = rows.length ? rows.map(function (r) {
       var badge = r.prize ? ' <span class="ev-badge p' + r.rank + '">' + r.prize + " SOMI</span>" : "";
-      return "<tr" + (r.rank <= 2 ? ' class="top' + r.rank + '"' : "") + "><td>" + r.rank + "</td><td>" + esc(r.name) + badge + "</td><td>+" + num(r.levelGained)
-        + "</td><td>+" + num(r.xpGained) + "</td><td>" + num(r.level) + "</td><td>" + num(r.tx) + "</td></tr>";
+      return "<tr" + (r.rank <= 2 ? ' class="top' + r.rank + '"' : "") + "><td>" + r.rank + "</td><td>" + esc(r.name) + badge + "</td><td>+" + num(r.xpGained)
+        + "</td><td>+" + num(r.levelGained) + "</td><td>" + num(r.level) + "</td><td>" + num(r.tx) + "</td></tr>";
     }).join("") : '<tr><td colspan="6">' + (data.phase === "idle" || data.phase === "scheduled" ? "The board fills in once the event starts." : "No results yet.") + "</td></tr>";
     var st = data.stats || {};
     $("[data-ev-tx]").textContent = num(st.tx);

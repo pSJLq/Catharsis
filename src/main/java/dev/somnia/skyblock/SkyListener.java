@@ -323,7 +323,9 @@ final class SkyListener implements Listener {
 
     @EventHandler
     public void onMenu(InventoryClickEvent event) {
-        if (event.getView().getTopInventory().getHolder() instanceof Menu) {
+        // The Craft GUI grid takes real items: CraftGui.onClick (HIGH) does its own allow/deny per slot, so a blanket
+        // cancel here blocked normal click-to-place, right-click single and the clicks that start a drag.
+        if (event.getView().getTopInventory().getHolder() instanceof Menu && !(event.getView().getTopInventory().getHolder() instanceof CraftGui.View)) {
             event.setCancelled(true);
         }
     }

@@ -101,6 +101,8 @@ final class ProfileStore {
         profile.lastCheckpoint = yaml.getInt("last-checkpoint");
         profile.questStep = yaml.getInt("quest-step");
         profile.questProgress = yaml.getInt("quest-progress");
+        profile.questVersion = yaml.getInt("quest-version", 1);
+        profile.questSkip.addAll(yaml.getStringList("quest-skip"));
         profile.fishingXp = yaml.getLong("fishing-xp");
         profile.enchantingXp = yaml.getLong("enchanting-xp");
         profile.carpentryXp = yaml.getLong("carpentry-xp");
@@ -147,6 +149,9 @@ final class ProfileStore {
         profile.starterMinion = yaml.getBoolean("starter-minion");
         profile.bossbarOff = yaml.getBoolean("bossbar-off");
         profile.menuItemOff = yaml.getBoolean("menu-item-off");
+        if (Quests.migrate(profile)) {
+            plugin.getLogger().info("Quests v1 -> v2 for " + uuid + ": step " + profile.questStep + ", already done later " + profile.questSkip);
+        }
         return profile;
     }
 
@@ -190,6 +195,8 @@ final class ProfileStore {
         yaml.set("last-checkpoint", profile.lastCheckpoint);
         yaml.set("quest-step", profile.questStep);
         yaml.set("quest-progress", profile.questProgress);
+        yaml.set("quest-version", profile.questVersion);
+        yaml.set("quest-skip", new ArrayList<>(profile.questSkip));
         yaml.set("fishing-xp", profile.fishingXp);
         yaml.set("enchanting-xp", profile.enchantingXp);
         yaml.set("carpentry-xp", profile.carpentryXp);
