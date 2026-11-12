@@ -462,13 +462,11 @@ final class SbMenu implements Listener, CommandExecutor {
 
         List<Component> tl = new ArrayList<>(wrap("Trade items safely with another player. Both sides confirm before anything moves.", NamedTextColor.GRAY));
         tl.add(Component.empty());
-        tl.add(plain("Use ", NamedTextColor.GRAY).append(plain("/trade <player>", NamedTextColor.YELLOW)));
-        tl.add(Component.empty());
-        tl.add(click("Click for help!"));
+        tl.add(plain("Trades are coming SOON.", NamedTextColor.YELLOW));
         view.set(22, levelingIcon(profile), c -> openLevels(player));
         view.set(46, icon(Material.EMERALD, plain("Trades", NamedTextColor.GREEN), tl), c -> {
             player.closeInventory();
-            player.sendMessage(Component.text("Stand next to a player and type /trade <name>. Both of you lock in before the swap.", NamedTextColor.YELLOW));
+            player.sendMessage(Component.text("Trades are coming SOON.", NamedTextColor.YELLOW));
         });
 
         Quests.Step step = plugin.quests().current(profile);

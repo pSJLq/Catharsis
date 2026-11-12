@@ -51,7 +51,7 @@ commands:
     description: Bring a Voidstep Blade back from your game wallet into the game
     usage: /deposit-nft <serial>
   trade:
-    description: Trade items with another player
+    description: Trades are coming SOON.
     usage: /trade <player>
   bazaar:
     description: Bazaar (STT market on Somnia)

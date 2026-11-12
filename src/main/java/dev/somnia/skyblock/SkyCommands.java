@@ -74,7 +74,9 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
             return depositNft(player, args);
         }
         if (name.equals("trade")) {
-            return plugin.trades().command(player, args);
+            // Direct player trades are not on the word bag yet (TradeManager stays for later).
+            player.sendMessage(Component.text("Trades are coming SOON.", NamedTextColor.YELLOW));
+            return true;
         }
         if (name.equals("island") && args.length > 0 && args[0].equalsIgnoreCase("reset")) {
             return plugin.islands().reset(player, profile, args.length > 1 && args[1].equalsIgnoreCase("confirm"));
@@ -212,6 +214,9 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (command.getName().equalsIgnoreCase("trade")) {
+            return List.of();
+        }
         if (command.getName().equalsIgnoreCase("trade") && args.length == 1) {
             List<String> names = new java.util.ArrayList<>();
             names.add("accept");
