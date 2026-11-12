@@ -317,6 +317,7 @@ final class Market implements Listener {
             return;
         }
         int left = qty;
+        int placed = 0;
         while (left > 0) {
             ItemStack stack = HoldItems.fromKey(plugin, key, left);
             if (stack == null) {
@@ -332,6 +333,7 @@ final class Market implements Listener {
                 unplaced += r.getAmount();
             }
             left -= amount - unplaced;
+            placed += amount - unplaced;
             if (unplaced > 0) {
                 stash(owner, key, left);
                 player.sendMessage(Component.text("Inventory full: " + left + "x " + label(key) + " waits in your stash. /bz claim", NamedTextColor.YELLOW));
@@ -339,8 +341,55 @@ final class Market implements Listener {
             }
         }
         if (commitNow) {
-            commit(player);
+            int given = placed;
+            afterBag(player, ok -> {
+                if (!ok && given > 0) {
+                    // The bag write was rolled back, so the live bag no longer shows them: keep them safe in the stash.
+                    stash(owner, key, given);
+                    message(owner, given + "x " + label(key) + " could not be signed into your bag and wait in your stash. /bz claim");
+                }
+            });
         }
+    }
+
+    /**
+     * Signs the live bag, then runs {@code done} once with true when the write landed (or there is no chain bag),
+     * false when it was rolled back. Items taken for a listing only become a listing after true; on false the
+     * rollback has already put them back.
+     */
+    void afterBag(Player player, Consumer<Boolean> done) {
+        afterBag(player, done, null);
+    }
+
+    /**
+     * As above; with {@code lateLanded} set, a write that gives no answer in 120 s counts as not signed (the lock
+     * is freed, nothing is listed), and if it still lands later {@code lateLanded} runs so the taken items are
+     * not lost.
+     */
+    void afterBag(Player player, Consumer<Boolean> done, Runnable lateLanded) {
+        if (plugin.words() == null) {
+            done.accept(true);
+            return;
+        }
+        java.util.concurrent.atomic.AtomicBoolean fired = new java.util.concurrent.atomic.AtomicBoolean();
+        String who = player.getName();
+        plugin.words().commitLocal(player, ok -> {
+            if (fired.compareAndSet(false, true)) {
+                done.accept(ok);
+            } else if (ok && lateLanded != null) {
+                plugin.getLogger().warning("Market: late bag write for " + who + " landed after the listing was dropped; items go to the stash.");
+                lateLanded.run();
+            }
+        });
+        if (lateLanded == null) {
+            return;
+        }
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (fired.compareAndSet(false, true)) {
+                plugin.getLogger().warning("Market: bag write for " + who + " gave no answer in 120 s; nothing listed.");
+                done.accept(false);
+            }
+        }, 20L * 120);
     }
 
     void commit(Player player) {
@@ -364,11 +413,31 @@ final class Market implements Listener {
             return;
         }
         save();
+        Map<String, Integer> before = new LinkedHashMap<>();
+        Map<String, Integer> s0 = stash.get(player.getUniqueId());
+        if (s0 != null) {
+            before.putAll(s0);
+        }
         for (Map.Entry<String, Integer> entry : mine.entrySet()) {
             player.sendMessage(Component.text("Stash → " + entry.getValue() + "x " + label(entry.getKey()), NamedTextColor.GREEN));
             giveOrStash(player.getUniqueId(), entry.getKey(), entry.getValue(), false);
         }
-        commit(player);
+        UUID id = player.getUniqueId();
+        afterBag(player, ok -> {
+            if (ok) {
+                return;
+            }
+            // Rolled back: what went into the bag (claimed minus what overflowed back into the stash) returns to the stash.
+            Map<String, Integer> now = stash.getOrDefault(id, Map.of());
+            for (Map.Entry<String, Integer> entry : mine.entrySet()) {
+                int overflow = now.getOrDefault(entry.getKey(), 0) - before.getOrDefault(entry.getKey(), 0);
+                int back = entry.getValue() - Math.max(0, overflow);
+                if (back > 0) {
+                    stash(id, entry.getKey(), back);
+                }
+            }
+            message(id, "The bag write did not land; your items stay in the stash. /bz claim");
+        });
     }
 
     @EventHandler
@@ -419,6 +488,10 @@ final class Market implements Listener {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (profile.wallet == null || profile.wallet.isBlank()) {
             player.sendMessage(Component.text("You have no purse yet.", NamedTextColor.RED));
+            return false;
+        }
+        if (plugin.words() != null && !plugin.words().ready(player)) {
+            player.sendMessage(Component.text("Your bag is still loading from the chain. Try again in a moment.", NamedTextColor.RED));
             return false;
         }
         return true;
@@ -1012,11 +1085,32 @@ final class Market implements Listener {
             player.sendMessage(Component.text("Quantity must be 1..2240.", NamedTextColor.RED));
             return;
         }
+        if (!lock(player)) {
+            return;
+        }
         if (!take(player, product.key(), qty)) {
+            unlock(player.getUniqueId());
             player.sendMessage(Component.text("You do not have " + qty + "x " + product.name() + ".", NamedTextColor.RED));
             return;
         }
-        commit(player);
+        UUID me = player.getUniqueId();
+        afterBag(player, ok -> {
+            unlock(me);
+            Player now = plugin.getServer().getPlayer(me);
+            if (!ok) {
+                // The rollback put the items back in the bag; no offer is made from items that are still there.
+                message(me, "Sell offer not created: the bag write did not land (Not enough STT for gas? use /deposit). Your items stay in your bag.");
+                return;
+            }
+            if (now != null) {
+                listOffer(now, product, qty, unit);
+            } else {
+                giveOrStash(me, product.key(), qty, false);
+            }
+        }, () -> stash(me, product.key(), qty));
+    }
+
+    private void listOffer(Player player, Product product, int qty, BigInteger unit) {
         Offer offer = new Offer();
         offer.id = nextOffer++;
         offer.seller = player.getUniqueId();
@@ -1032,7 +1126,23 @@ final class Market implements Listener {
     }
 
     void buyOffer(Player player, Offer offer, int qty) {
-        if (!chainReady(player) || offer.busy || qty <= 0 || !lock(player)) {
+        if (!chainReady(player) || qty <= 0) {
+            return;
+        }
+        // The menu may be older than the offer: it can be sold out, partly sold or cancelled since.
+        if (offers.get(offer.id) != offer || qty > offer.qty) {
+            player.sendMessage(Component.text("That offer changed: " + (offers.get(offer.id) == offer ? "only " + offer.qty + "x left." : "it is gone.") + " Open the Bazaar again.", NamedTextColor.RED));
+            return;
+        }
+        if (offer.seller.equals(player.getUniqueId())) {
+            player.sendMessage(Component.text("That is your own offer.", NamedTextColor.RED));
+            return;
+        }
+        if (offer.busy) {
+            player.sendMessage(Component.text("Someone is buying that offer right now. Try again in a moment.", NamedTextColor.GRAY));
+            return;
+        }
+        if (!lock(player)) {
             return;
         }
         offer.busy = true;
@@ -1114,6 +1224,14 @@ final class Market implements Listener {
             }
             return;
         }
+        if (orders.get(order.id) != order || qty > order.left) {
+            player.sendMessage(Component.text("That buy order changed: " + (orders.get(order.id) == order ? "only " + order.left + "x left." : "it is gone.") + " Open the Bazaar again.", NamedTextColor.RED));
+            return;
+        }
+        if (order.buyer.equals(player.getUniqueId())) {
+            player.sendMessage(Component.text("That is your own buy order.", NamedTextColor.RED));
+            return;
+        }
         if (!lock(player)) {
             return;
         }
@@ -1121,9 +1239,20 @@ final class Market implements Listener {
             unlock(player.getUniqueId());
             return;
         }
-        commit(player);
         order.busy = true;
         UUID seller = player.getUniqueId();
+        afterBag(player, ok -> {
+            if (!ok) {
+                unlock(seller);
+                order.busy = false;
+                message(seller, "Not sold: the bag write did not land (Not enough STT for gas? use /deposit). Your items stay in your bag.");
+                return;
+            }
+            fillOrder(seller, order, qty);
+        }, () -> stash(seller, order.key, qty));
+    }
+
+    private void fillOrder(UUID seller, Order order, int qty) {
         plugin.realm().send(seller, "Bazaar sell " + qty + "x " + label(order.key), RealmChain.fillBuyOrder(order.id, qty), BigInteger.ZERO,
                 receipt -> {
                     unlock(seller);
@@ -1285,8 +1414,18 @@ final class Market implements Listener {
         }
         int qty = hand.getAmount();
         player.getInventory().setItem(slotIndex, null);
-        commit(player);
         UUID seller = player.getUniqueId();
+        afterBag(player, ok -> {
+            if (!ok) {
+                unlock(seller);
+                message(seller, "Auction not created: the bag write did not land (Not enough STT for gas? use /deposit). The item stays in your bag.");
+                return;
+            }
+            listAuction(seller, key, qty, start, minutes);
+        }, () -> stash(seller, key, qty));
+    }
+
+    private void listAuction(UUID seller, String key, int qty, BigInteger start, int minutes) {
         BigInteger fee = RealmChain.listingFee(start);
         plugin.realm().send(seller, "Auction " + qty + "x " + label(key) + " (fee " + RealmChain.stt(fee) + " STT)",
                 RealmChain.createAuction(HoldItems.idOfKey(key), qty, start, minutes * 60), fee,
@@ -1324,7 +1463,15 @@ final class Market implements Listener {
     }
 
     void bid(Player player, Lot lot, BigInteger amount) {
-        if (!chainReady(player) || lot.busy || lot.done) {
+        if (!chainReady(player) || lot.busy || lot.done || lots.get(lot.id) != lot) {
+            return;
+        }
+        if (lot.seller.equals(player.getUniqueId())) {
+            player.sendMessage(Component.text("You cannot bid on your own auction.", NamedTextColor.RED));
+            return;
+        }
+        if (System.currentTimeMillis() >= lot.end) {
+            player.sendMessage(Component.text("That auction has ended.", NamedTextColor.RED));
             return;
         }
         if (amount.compareTo(RealmChain.minBid(lot.start, lot.bid)) < 0) {
@@ -1397,8 +1544,18 @@ final class Market implements Listener {
         }
         int qty = stack.getAmount();
         player.getInventory().setItem(slotIndex, null);
-        commit(player);
         UUID seller = player.getUniqueId();
+        afterBag(player, ok -> {
+            if (!ok) {
+                unlock(seller);
+                message(seller, "BIN not listed: the bag write did not land (Not enough STT for gas? use /deposit). The item stays in your bag.");
+                return;
+            }
+            listBin(seller, key, qty, price, minutes);
+        }, () -> stash(seller, key, qty));
+    }
+
+    private void listBin(UUID seller, String key, int qty, BigInteger price, int minutes) {
         BigInteger fee = RealmChain.binFee(price);
         plugin.realm().sendBin(seller, "BIN " + qty + "x " + label(key) + " for " + RealmChain.stt(price) + " STT (fee " + RealmChain.stt(fee) + ")",
                 RealmChain.binList(HoldItems.idOfKey(key), qty, price, minutes * 60), fee,

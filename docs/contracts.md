@@ -41,3 +41,5 @@ forge test
 `contracts/test/SkySkills2.t.sol` covers the reset flow, an authorized operator, and the entry caps.
 
 `contracts/test/SkyIsland3.t.sol` covers the co-op contract: attestation required for every write, replayed, expired, altered, foreign-contract and other-player attestations, invite / accept / leave, invite expiry and revoke, a joiner's solo deed released on join, the 5-player cap (also with pending invites), kick rules (outsider, other deed, owner, self, re-invite after a kick), transfers, and the one-time import.
+
+`contracts/test/TradeFlows.t.sol` runs two wallets through SkyRealm2 and SkyBin2: a Bazaar sell offer and buy order (escrow, partial fill, over-fill, own order, cancel refund), an auction (own bid, low bid, outbid credit and withdraw, settle once, no-bid settle) and Buy-It-Now (own listing, wrong price, sold once, cancel, expiry).
