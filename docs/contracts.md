@@ -9,7 +9,7 @@ Source lives in [`contracts/`](../contracts). Each `.sol` file is SPDX `MIT`, `p
 | Contract | Address | Deploy / notes |
 | --- | --- | --- |
 | SkyKeys | [`0x75B33d1FFd2cb793Cca8280B8E80762339927B3b`](https://explorer.testnet.somnia.network/address/0x75B33d1FFd2cb793Cca8280B8E80762339927B3b) | One-way flag for wallets whose key was exported (mode B). Deployed 2026-11-11. |
-| SkyIsland2 | [`0xaCced5efB1762DfAF2587723c9dC07256fa4eb60`](https://explorer.testnet.somnia.network/address/0xaCced5efB1762DfAF2587723c9dC07256fa4eb60) | Island deed and membership (attested). Migrated from SkyIsland. |
+| SkyIsland3 | [`0xeeEA12518a25852242E7841cf8436141e57475Cf`](https://explorer.testnet.somnia.network/address/0xeeEA12518a25852242E7841cf8436141e57475Cf) | Island deeds and co-op (attested): invite, accept, leave, kick, at most 5 players per island. Imported from SkyIsland2 on 2026-11-12. |
 | SkyWord2 | [`0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405`](https://explorer.testnet.somnia.network/address/0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405) | Inventory (packed bag words). Slot 9 of the hotbar can never hold an item. |
 | SkySkills3 | [`0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d`](https://explorer.testnet.somnia.network/address/0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d) | Skills and collections (current). Caps of 1,000,000 per entry and 20,000,000 per hour. |
 | SkyHold2 | [`0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f`](https://explorer.testnet.somnia.network/address/0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f) | Held items / equipment slots |
@@ -19,6 +19,8 @@ Source lives in [`contracts/`](../contracts). Each `.sol` file is SPDX `MIT`, `p
 | SkyBin2 | [`0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3`](https://explorer.testnet.somnia.network/address/0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3) | Buy-It-Now listings |
 
 Previous contracts (SkyIsland `0xeB97…6bA0`, SkyWord `0x699C…684c`, SkySkills2 `0x287b…BcEf`, SkySkills v1 `0x81f5…854a`, SkyHold `0x26cf…03F3`, SkyGear `0x4f63…E1d8`, AOTV `0x378D…9c24`, SkyRealm `0xEE46…C59d`, SkyBin `0xCfA5…d638`) were migrated on 2026-11-11 and closed; they stay onchain for history.
+
+SkyIsland2 [`0xaCced5efB1762DfAF2587723c9dC07256fa4eb60`](https://explorer.testnet.somnia.network/address/0xaCced5efB1762DfAF2587723c9dC07256fa4eb60) is old and no longer written: its 3 deeds and the island counters were imported into SkyIsland3 on 2026-11-12 and its import was closed.
 
 The plugin also talks to the public Somnia VRF coordinator on Shannon: `0x0834459256bbb8d2efee23dc6c3f1722266182dd`.
 
@@ -37,3 +39,5 @@ forge test
 ```
 
 `contracts/test/SkySkills2.t.sol` covers the reset flow, an authorized operator, and the entry caps.
+
+`contracts/test/SkyIsland3.t.sol` covers the co-op contract: attestation required for every write, replayed, expired, altered, foreign-contract and other-player attestations, invite / accept / leave, invite expiry and revoke, a joiner's solo deed released on join, the 5-player cap (also with pending invites), kick rules (outsider, other deed, owner, self, re-invite after a kick), transfers, and the one-time import.

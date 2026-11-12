@@ -42,11 +42,19 @@ const gearIface = new ethers.Interface([
 const islandIface = new ethers.Interface([
   'function createIsland()',
   'function invite(address member)',
+  'function revokeInvite(address member)',
+  'function accept(uint256 id)',
+  'function leave()',
+  'function kick(address member)',
   'function transferFrom(address from, address to, uint256 id)',
   'function applyBatch(uint32 cobble, uint32 oak, uint32 wheat)',
   'function craft(uint8 kind)',
   'event Transfer(address indexed from, address indexed to, uint256 indexed id)',
-  'event Invited(uint256 indexed id, address indexed member)',
+  'event Invited(uint256 indexed id, address indexed member, address indexed by, uint64 until)',
+  'event InviteRevoked(uint256 indexed id, address indexed member)',
+  'event Joined(uint256 indexed id, address indexed member, uint256 released)',
+  'event Left(uint256 indexed id, address indexed member)',
+  'event Kicked(uint256 indexed id, address indexed member, address indexed by)',
   'event Batch(address indexed player, uint32 cobble, uint32 oak, uint32 wheat)',
   'event Craft(address indexed player, uint8 kind)',
 ]);
@@ -642,7 +650,7 @@ async function serveIcon(res, name) {
 const SHANNON = 'https://shannon-explorer.somnia.network';
 const WATCH = [chain.island, chain.hold, chain.gear, chain.word, chain.aotv].filter(Boolean).map((address) => ethers.getAddress(address));
 const CONTRACTS = [
-  { name: 'Island', address: ethers.getAddress(chain.island), role: 'Islands, gathering, and crafting' },
+  { name: 'Island', address: ethers.getAddress(chain.island), role: 'Island deeds and co-op' },
   { name: 'Hold', address: HOLD_PRETTY, role: 'Bags and chests' },
   { name: 'Gear', address: GEAR_PRETTY, role: 'Tool traits' },
   { name: 'Word', address: WORD, role: 'Spell words' },
@@ -729,6 +737,20 @@ function describeLog(address, parsed, row) {
     } else if (name === 'Invited') {
       rememberPlayer(row, parsed.args.member);
       addBit(row, 'Invited ' + shortAddr(parsed.args.member) + ' to island ' + parsed.args.id.toString());
+    } else if (name === 'InviteRevoked') {
+      rememberPlayer(row, parsed.args.member);
+      addBit(row, 'Took back the island ' + parsed.args.id.toString() + ' invite of ' + shortAddr(parsed.args.member));
+    } else if (name === 'Joined') {
+      rememberPlayer(row, parsed.args.member);
+      const released = parsed.args.released.toString();
+      addBit(row, shortAddr(parsed.args.member) + ' joined the co-op on island ' + parsed.args.id.toString() + (released !== '0' ? ' (gave up island ' + released + ')' : ''));
+    } else if (name === 'Left') {
+      rememberPlayer(row, parsed.args.member);
+      addBit(row, shortAddr(parsed.args.member) + ' left the co-op on island ' + parsed.args.id.toString());
+    } else if (name === 'Kicked') {
+      rememberPlayer(row, parsed.args.member);
+      rememberPlayer(row, parsed.args.by);
+      addBit(row, shortAddr(parsed.args.member) + ' was removed from the co-op on island ' + parsed.args.id.toString());
     } else if (name === 'Transfer') {
       rememberPlayer(row, parsed.args.from);
       rememberPlayer(row, parsed.args.to);

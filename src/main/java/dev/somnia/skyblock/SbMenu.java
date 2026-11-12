@@ -1371,6 +1371,8 @@ final class SbMenu implements Listener, CommandExecutor {
         warn.add(plain("Your own island is left behind.", NamedTextColor.GRAY));
         warn.add(plain("Onchain: your skills reset and the", NamedTextColor.GRAY));
         warn.add(plain("bag clears from your purse (gas).", NamedTextColor.GRAY));
+        warn.add(plain("Your purse joins the co-op deed and", NamedTextColor.GRAY));
+        warn.add(plain("your own island deed is released.", NamedTextColor.GRAY));
         warn.add(Component.empty());
         warn.add(plain("Then you play on " + owner + "'s island", NamedTextColor.AQUA));
         warn.add(plain("and share its collections.", NamedTextColor.AQUA));

@@ -349,7 +349,7 @@ final class WalletService {
         return sendData(profile, contract(), FunctionEncoder.encode(function), 8_000_000L);
     }
 
-    /** SkyIsland2.ownerOf(deed), or null when the deed does not exist. */
+    /** SkyIsland3.ownerOf(deed), or null when the deed does not exist. */
     String islandOwner(BigInteger deed) throws IOException {
         if (deed == null || deed.signum() <= 0) {
             return null;
@@ -369,10 +369,76 @@ final class WalletService {
         return owner.equalsIgnoreCase("0x0000000000000000000000000000000000000000") ? null : owner;
     }
 
-    /** SkyIsland2.invite(member) from the island owner's purse (attested; the owner pays the gas). */
+    /** SkyIsland3.invite(member) from the island owner's purse (attested; the owner pays the gas). */
     String inviteToIsland(Profile owner, String member) throws Exception {
         Function function = new Function("invite", List.of(new Address(member)), Collections.emptyList());
         return sendData(owner, contract(), FunctionEncoder.encode(function), 8_000_000L);
+    }
+
+    /** SkyIsland3.accept(deed) from the joiner's purse (attested; the joiner pays). Burns the joiner's solo deed. */
+    String acceptIsland(Profile joiner, BigInteger deed) throws Exception {
+        Function function = new Function("accept", List.of(new Uint256(deed)), Collections.emptyList());
+        return sendData(joiner, contract(), FunctionEncoder.encode(function), 12_000_000L);
+    }
+
+    /** SkyIsland3.leave() from the leaving member's purse (attested; the member pays). */
+    String leaveIsland(Profile member) throws Exception {
+        Function function = new Function("leave", Collections.emptyList(), Collections.emptyList());
+        return sendData(member, contract(), FunctionEncoder.encode(function), 8_000_000L);
+    }
+
+    /** SkyIsland3.kick(member) from the purse of the co-op member who completed the kick (attested). */
+    String kickFromIsland(Profile by, String member) throws Exception {
+        Function function = new Function("kick", List.of(new Address(member)), Collections.emptyList());
+        return sendData(by, contract(), FunctionEncoder.encode(function), 8_000_000L);
+    }
+
+    /** SkyIsland3.coopOf(deed): the deed owner first, then the co-op members. Empty when the deed does not exist. */
+    List<String> islandCoop(BigInteger deed) throws IOException {
+        List<String> out = new ArrayList<>();
+        if (deed == null || deed.signum() <= 0) {
+            return out;
+        }
+        Function function = new Function("coopOf", List.of(new Uint256(deed)), List.of(new TypeReference<Address>() {
+        }, new TypeReference<DynamicArray<Address>>() {
+        }));
+        String raw = call("0x0000000000000000000000000000000000000000", contract(), function);
+        @SuppressWarnings("rawtypes")
+        List<Type> decoded = FunctionReturnDecoder.decode(raw, function.getOutputParameters());
+        if (decoded.size() < 2) {
+            return out;
+        }
+        String owner = decoded.get(0).getValue().toString();
+        if (owner.equalsIgnoreCase("0x0000000000000000000000000000000000000000")) {
+            return out;
+        }
+        out.add(owner);
+        @SuppressWarnings("unchecked")
+        List<Address> members = (List<Address>) decoded.get(1).getValue();
+        for (Address a : members) {
+            out.add(a.getValue());
+        }
+        return out;
+    }
+
+    /** SkyIsland3.inviteOf(deed, member): seconds-since-epoch expiry of a live invite from the current owner, else 0. */
+    long islandInviteUntil(BigInteger deed, String member) throws IOException {
+        Function function = new Function("inviteOf", List.of(new Uint256(deed), new Address(member)), List.of(new TypeReference<Address>() {
+        }, new TypeReference<org.web3j.abi.datatypes.generated.Uint64>() {
+        }));
+        String raw = call("0x0000000000000000000000000000000000000000", contract(), function);
+        @SuppressWarnings("rawtypes")
+        List<Type> decoded = FunctionReturnDecoder.decode(raw, function.getOutputParameters());
+        if (decoded.size() < 2) {
+            return 0;
+        }
+        String by = decoded.get(0).getValue().toString();
+        String owner = islandOwner(deed);
+        long until = ((BigInteger) decoded.get(1).getValue()).longValue();
+        if (owner == null || !owner.equalsIgnoreCase(by) || until <= System.currentTimeMillis() / 1000) {
+            return 0;
+        }
+        return until;
     }
 
 

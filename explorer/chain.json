@@ -1,7 +1,7 @@
 {
   "chainId": 50312,
   "rpc": "https://api.infra.testnet.somnia.network",
-  "island": "0xaCced5efB1762DfAF2587723c9dC07256fa4eb60",
+  "island": "0xeeEA12518a25852242E7841cf8436141e57475Cf",
   "hold": "0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f",
   "gear": "0x67e01A054Dbe23d45695F737a77768d4a842c4b0",
   "purse": "0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6",
@@ -21,9 +21,11 @@
     "aotv": "0x378D4201ce775263f101EB5eC4A63d2E5d669c24",
     "realm": "0xEE46A54C65561Ec4F1589Db5a612c30b8fEcC59d",
     "bin": "0xCfA57B693E5AAeBAcCC9F56ED868107c8bF4d638",
-    "skills": "0x287beae39a6e65b3a2b4026258490b0bdb44bcef"
+    "skills": "0x287beae39a6e65b3a2b4026258490b0bdb44bcef",
+    "island2": "0xaCced5efB1762DfAF2587723c9dC07256fa4eb60"
   },
   "skills": "0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d",
   "keys": "0x75B33d1FFd2cb793Cca8280B8E80762339927B3b",
-  "signer": "0xF3E6da11faF651FADCF316d49A53ae05A3D26E50"
+  "signer": "0xF3E6da11faF651FADCF316d49A53ae05A3D26E50",
+  "islandTx": "0xab9835527c0c9ad72e282dccd488f1c6d07465b276d3c5fb4084fe55c0f79028"
 }

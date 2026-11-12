@@ -74,6 +74,10 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(hub, this);
         chain = new ChainClient(this);
         wallets = new WalletService(this);
+        if (chain.enabled()) {
+            // coops.yml is a cache: compare it with SkyIsland3 once the server is up (the chain wins).
+            getServer().getScheduler().runTaskLaterAsynchronously(this, coops::reconcile, 100L);
+        }
         hold = new HoldSync(this);
         if (wallets.wordEnabled()) {
             words = new WordChain(this);
