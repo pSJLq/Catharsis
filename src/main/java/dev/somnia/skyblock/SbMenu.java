@@ -495,11 +495,11 @@ final class SbMenu implements Listener, CommandExecutor {
 
         view.set(29, icon(Material.GOLD_BLOCK, plain("Bazaar", NamedTextColor.GOLD), List.of(
                 plain("Buy and sell resources with", NamedTextColor.GRAY), plain("orders and offers in STT.", NamedTextColor.GRAY),
-                Component.empty(), plain("Also accessible via /bz", NamedTextColor.DARK_GRAY), Component.empty(), click("Click to open!"))),
+                Component.empty(), plain("Also accessible via /bz", NamedTextColor.DARK_GRAY), plain("Cookie Buff, or the Bazaar Master", NamedTextColor.DARK_GRAY), Component.empty(), click("Click to open!"))),
                 c -> { player.closeInventory(); player.performCommand("bz"); });
         view.set(30, icon(Material.GOLDEN_HORSE_ARMOR, plain("Auction House", NamedTextColor.GOLD), List.of(
                 plain("Bid on unique gear. Escrow is", NamedTextColor.GRAY), plain("held by the Somnia contract.", NamedTextColor.GRAY),
-                Component.empty(), plain("Also accessible via /ah", NamedTextColor.DARK_GRAY), Component.empty(), click("Click to open!"))),
+                Component.empty(), plain("Also accessible via /ah", NamedTextColor.DARK_GRAY), plain("Cookie Buff, or the Auction Master", NamedTextColor.DARK_GRAY), Component.empty(), click("Click to open!"))),
                 c -> { player.closeInventory(); player.performCommand("ah"); });
         view.set(31, icon(Material.CRAFTING_TABLE, plain("Crafting Table", NamedTextColor.GREEN), List.of(
                 plain("Opens the crafting grid.", NamedTextColor.GRAY), plain("Crafting earns Carpentry XP.", NamedTextColor.GRAY),

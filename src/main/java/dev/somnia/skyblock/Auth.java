@@ -555,7 +555,15 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             case "register" -> register(player, args);
             case "login" -> login(player, args);
             case "changepassword" -> changePassword(player, args);
-            case "dev" -> devCommand(player, true);
+            case "dev" -> {
+                // Dev accounts only (after /login): /dev cookie opens the Booster Cookie test tools; also /dev while already in dev mode.
+                boolean tools = (args.length > 0 && args[0].equalsIgnoreCase("cookie")) || (args.length == 0 && isDev(player));
+                if (tools && isDevAccount(player) && authed.contains(player.getUniqueId())) {
+                    plugin.cookies().openDev(player);
+                } else {
+                    devCommand(player, true);
+                }
+            }
             case "user" -> devCommand(player, false);
             default -> {
             }

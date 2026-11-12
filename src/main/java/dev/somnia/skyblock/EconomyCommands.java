@@ -29,17 +29,17 @@ final class EconomyCommands implements CommandExecutor, TabCompleter {
         try {
             switch (command.getName()) {
                 case "bazaar" -> {
-                    if (plugin.cookies().allowAnywhere(player, "Bazaar")) {
+                    if (plugin.cookies().allowAnywhere(player, "Bazaar Master")) {
                         bazaar(player, args);
                     }
                 }
                 case "auction" -> {
-                    if (plugin.cookies().allowAnywhere(player, "Auction House")) {
+                    if (plugin.cookies().allowAnywhere(player, "Auction Master")) {
                         auction(player, args);
                     }
                 }
                 case "bank" -> {
-                    if (plugin.cookies().allowAnywhere(player, "Bank")) {
+                    if (plugin.cookies().allowAnywhere(player, "Banker")) {
                         plugin.market().openBank(player);
                     }
                 }
@@ -53,7 +53,11 @@ final class EconomyCommands implements CommandExecutor, TabCompleter {
                     }
                 }
                 case "stats" -> plugin.stats().show(player);
-                case "relic" -> plugin.market().openBank(player);
+                case "relic" -> {
+                    if (plugin.cookies().allowAnywhere(player, "Banker")) {
+                        plugin.market().openBank(player);
+                    }
+                }
                 case "quest" -> plugin.quests().show(player);
                 default -> {
                     return false;

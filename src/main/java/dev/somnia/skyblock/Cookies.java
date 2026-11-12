@@ -105,7 +105,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
     }
 
     String receiver() {
-        String to = plugin.getConfig().getString("cookie.receiver", "0x2Ba34FC1479d17A7B1F6539b73D624d4143b848E");
+        String to = plugin.getConfig().getString("cookie.receiver", "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D");
         return to == null ? "" : to.trim();
     }
 
@@ -138,13 +138,22 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         return d > 0 ? d + "d " + h + "h" : h > 0 ? h + "h " + mm + "m" : Math.max(1, mm) + "m";
     }
 
-    /** /ah, /bz, /bank: anywhere with the buff, otherwise in the hub. True when allowed (tells the player otherwise). */
-    boolean allowAnywhere(Player player, String what) {
-        if (!gate() || active(player) || plugin.hub().isHub(player.getWorld())) {
+    /**
+     * /ah, /bz, /bank (and the SkyBlock menu buttons that run them): as on Hypixel, only with the Cookie Buff.
+     * Everyone else uses the hub NPC ({@code npc}: Auction Master, Bazaar Master, Banker), which opens the menu directly.
+     */
+    boolean allowAnywhere(Player player, String npc) {
+        if (!gate() || active(player)) {
             return true;
         }
-        player.sendMessage(Component.text("Opening the " + what + " from anywhere needs the Booster Cookie buff. ", NamedTextColor.RED)
-                .append(Component.text("Visit it in the hub, or see /cookie.", NamedTextColor.GRAY)));
+        player.sendMessage(Component.text("Visit the ", SOFT)
+                .append(Component.text(npc, SOFT_GOLD))
+                .append(Component.text(" in the Hub, or eat a ", SOFT))
+                .append(Component.text("Booster Cookie", NamedTextColor.GOLD)
+                        .clickEvent(ClickEvent.runCommand("/cookie"))
+                        .hoverEvent(HoverEvent.showText(Component.text("Open /cookie", NamedTextColor.YELLOW))))
+                .append(Component.text(" to use this anywhere.", SOFT)));
+        player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 0.5f, 1.1f);
         return false;
     }
 
@@ -578,5 +587,48 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         if (titled.remove(player.getUniqueId())) {
             player.clearTitle();
         }
+    }
+
+    // ---------- dev tools (/dev cookie; dev accounts only) ----------
+
+    /** Test tools for dev accounts: clear or apply the buff (profile only, nothing onchain), or take a cookie item. */
+    void openDev(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        Market.View view = new Market.View(27, "Dev: Booster Cookie");
+        ItemStack pane = Market.icon(Material.RED_STAINED_GLASS_PANE, " ", NamedTextColor.GRAY, List.of());
+        for (int i = 0; i < 27; i++) {
+            view.getInventory().setItem(i, pane);
+        }
+        long left = profile.cookieUntil - System.currentTimeMillis();
+        String now = left > 0 ? left(left) : "not active";
+        view.set(4, Market.icon(Material.COOKIE, "Your buff: " + now, NamedTextColor.GOLD, List.of(
+                "~Dev account only. Nothing here spends SOMI.")), null);
+        view.set(11, Market.icon(Material.BARRIER, "Clear my Cookie Buff", NamedTextColor.RED, List.of(
+                "Sets the time left to 0: commands, menu", "selling, flight and free gas stop now.",
+                "~Profile only, no onchain effect.", "!Click to clear")), c -> {
+            profile.cookieUntil = 0L;
+            plugin.profiles().save(profile);
+            flight(player, profile, false);
+            plugin.getLogger().info("Dev: " + player.getName() + " cleared their Booster Cookie buff.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Cookie Buff cleared.", NamedTextColor.GRAY)));
+            openDev(player);
+        });
+        view.set(13, Market.icon(Material.CLOCK, "Apply a " + days() + "-day Cookie Buff", NamedTextColor.GREEN, List.of(
+                "Sets the time left to exactly " + days() + " days.", "~Profile only, no onchain effect.", "!Click to apply")), c -> {
+            profile.cookieUntil = System.currentTimeMillis() + days() * DAY;
+            plugin.profiles().save(profile);
+            clearOutOfStt(player);
+            plugin.getLogger().info("Dev: " + player.getName() + " applied a " + days() + "-day Booster Cookie buff.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Cookie Buff set to " + days() + " days.", NamedTextColor.GRAY)));
+            openDev(player);
+        });
+        view.set(15, Market.icon(Material.CHEST, "Give me a Booster Cookie item", NamedTextColor.GOLD, List.of(
+                "One cookie item, no SOMI spent.", "~It lands in your bag like any item,", "~so the next bag write records it.", "!Click to take one")), c -> {
+            plugin.market().giveOrStash(player.getUniqueId(), KEY, 1, true);
+            plugin.getLogger().info("Dev: " + player.getName() + " took a Booster Cookie item.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Booster Cookie added to your inventory.", NamedTextColor.GRAY)));
+        });
+        view.set(22, Market.icon(Material.ARROW, "Close", NamedTextColor.GRAY, List.of()), c -> player.closeInventory());
+        player.openInventory(view.getInventory());
     }
 }

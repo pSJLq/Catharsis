@@ -28,9 +28,9 @@ cookie:
   price-somi: 25
   mainnet-rpc: "https://api.infra.mainnet.somnia.network/"
   mainnet-chain-id: 5031
-  receiver: "0x2Ba34FC1479d17A7B1F6539b73D624d4143b848E"   # where the SOMI goes (the admin address)
+  receiver: "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D"   # where the SOMI goes (donation address)
   days: 4
-  gate-commands: true        # without the buff, /ah /bz /bank open only in the hub
+  gate-commands: true        # without the buff, /ah /bz /bank (and their menu buttons) are closed; the hub NPCs always work
   sponsor-topup-stt: 0.02    # buff holders: the admin wallet tops the purse up by at least this when gas is short
 
 # Login with a limbo (Auth). Purse keys are sealed with the player's password (Argon2id + AES-256-GCM).
