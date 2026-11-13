@@ -3,10 +3,12 @@ package dev.somnia.skyblock;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Item collections: first pickup unlocks, tiers at {@link ProgressMath} thresholds, framed chat notices. */
@@ -146,8 +148,27 @@ final class Collects {
         long before = shared(p, e);
         p.collections.merge(e.key(), amount, Long::sum);
         plugin.skillChain().queueCollection(p, e, amount);
-        announce(player, p, e, before, shared(p, e));
+        long after = shared(p, e);
+        for (Player who : onlineGroup(p, player)) {
+            announce(who, plugin.profiles().get(who.getUniqueId()), e, before, after);
+        }
         plugin.stats().markDirty(player);
+    }
+
+    /** The picker plus every online co-op partner (shared collections, shared SkyBlock XP). */
+    private static List<Player> onlineGroup(Profile p, Player picker) {
+        List<Player> out = new ArrayList<>();
+        out.add(picker);
+        for (Profile m : Coops.group(p)) {
+            if (m.uuid.equals(picker.getUniqueId())) {
+                continue;
+            }
+            Player online = Bukkit.getPlayer(m.uuid);
+            if (online != null && online.isOnline()) {
+                out.add(online);
+            }
+        }
+        return out;
     }
 
     /** Called after any collection counter moved (also for the chain-backed island counters). */

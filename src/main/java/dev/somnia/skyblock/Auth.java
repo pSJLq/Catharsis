@@ -1000,7 +1000,6 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             player.setGameMode(prev);
         }
         player.updateCommands();
-        player.sendPlayerListHeader(Component.text("[DEV]", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
         if (plugin.stats() != null) {
             plugin.stats().refreshListName(player);
         }
@@ -1031,7 +1030,6 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         player.setFlying(false);
         player.setAllowFlight(false);
         player.setInvisible(false);
-        player.sendPlayerListHeader(Component.empty());
         player.updateCommands();
         if (plugin.stats() != null) {
             plugin.stats().refreshListName(player);

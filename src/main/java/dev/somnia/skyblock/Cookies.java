@@ -136,7 +136,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         long d = m / 1440;
         long h = (m % 1440) / 60;
         long mm = m % 60;
-        return d > 0 ? d + "d " + h + "h" : h > 0 ? h + "h " + mm + "m" : Math.max(1, mm) + "m";
+        return d > 0 ? d + "d " + h + "h " + mm + "m" : h > 0 ? h + "h " + mm + "m" : Math.max(1, mm) + "m";
     }
 
     /**
@@ -499,6 +499,9 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
     }
 
     private boolean ownIsland(Player player, Profile profile, Location at) {
+        if (plugin.visits() != null) {
+            return plugin.visits().allowedHere(player, profile, at);
+        }
         return profile.islandReady && plugin.islands().contains(profile, at);
     }
 
@@ -536,7 +539,10 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             back.setYaw(event.getTo().getYaw());
             back.setPitch(event.getTo().getPitch());
             event.setTo(back);
-            player.sendActionBar(Component.text("Island flight stops at the edge of your island.", SOFT_GOLD));
+            player.sendActionBar(Component.text(
+                    plugin.visits() != null && plugin.visits().isGuest(player)
+                            ? "Island flight stops at the edge of the island."
+                            : "Island flight stops at the edge of your island.", SOFT_GOLD));
         }
     }
 

@@ -658,6 +658,11 @@ final class SbMenu implements Listener, CommandExecutor {
         )), null);
         // Bottom row: back, close, active effects.
         List<Component> fx = new ArrayList<>();
+        if (plugin.cookies() != null && plugin.cookies().active(player)) {
+            Profile fxProfile = plugin.profiles().get(player.getUniqueId());
+            long remain = fxProfile.cookieUntil - System.currentTimeMillis();
+            fx.add(plain("Booster: " + Cookies.left(remain), NamedTextColor.AQUA));
+        }
         for (org.bukkit.potion.PotionEffect effect : player.getActivePotionEffects()) {
             String n = effect.getType().getKey().getKey().replace('_', ' ');
             fx.add(plain(Character.toUpperCase(n.charAt(0)) + n.substring(1) + " " + ProgressMath.numeral(effect.getAmplifier() + 1), NamedTextColor.GREEN)
@@ -1177,8 +1182,13 @@ final class SbMenu implements Listener, CommandExecutor {
                 c -> { player.closeInventory(); player.performCommand("island"); });
         view.set(11, icon(Material.NETHER_STAR, plain("Hub", NamedTextColor.GREEN), List.of(plain(plugin.hub().name("plaza") + " spawn.", NamedTextColor.GRAY), Component.empty(), click("Click to warp!"))),
                 c -> { player.closeInventory(); player.performCommand("hub"); });
+        view.set(12, icon(Material.OAK_BOAT, plain("Visit a Player", NamedTextColor.AQUA), List.of(
+                plain("Teleport to another player's island as a guest.", NamedTextColor.GRAY),
+                plain("You can walk, but you cannot change anything.", NamedTextColor.GRAY),
+                Component.empty(), click("Click to pick a player!"))),
+                c -> openVisit(player));
         Zones zones = plugin.hub().zones();
-        int[] slots = {12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30};
+        int[] slots = {13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30};
         int i = 0;
         if (zones != null) {
             for (Zones.District d : zones.districts()) {
@@ -1202,6 +1212,63 @@ final class SbMenu implements Listener, CommandExecutor {
         }
         footer(view, player, () -> openMain(player));
         player.openInventory(view.inventory);
+    }
+
+    private void openVisit(Player player) {
+        View view = page("Visit a Player");
+        view.set(4, icon(Material.OAK_BOAT, plain("Visit", NamedTextColor.AQUA), List.of(
+                plain("Pick a player. You arrive as a guest.", NamedTextColor.GRAY),
+                plain("Also /visit <player>. /is or /hub leaves.", NamedTextColor.DARK_GRAY))), null);
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34};
+        List<Visits.Resolved> targets = plugin.visits() == null ? List.of() : plugin.visits().listTargets(player);
+        int i = 0;
+        for (Visits.Resolved t : targets) {
+            if (i >= slots.length) {
+                break;
+            }
+            ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+            org.bukkit.inventory.meta.SkullMeta meta = (org.bukkit.inventory.meta.SkullMeta) head.getItemMeta();
+            org.bukkit.OfflinePlayer off = plugin.getServer().getOfflinePlayer(t.id());
+            meta.setOwningPlayer(off);
+            head.setItemMeta(meta);
+            String status = t.online() ? "Online" : "Offline";
+            NamedTextColor statusColor = t.online() ? NamedTextColor.GREEN : NamedTextColor.GRAY;
+            view.set(slots[i++], icon(head.getType(), plain(t.name(), NamedTextColor.YELLOW), List.of(
+                    plain(status, statusColor),
+                    plain("Guest visit: walk only (Booster flight still works).", NamedTextColor.GRAY),
+                    Component.empty(), click("Click to visit!"))),
+                    c -> {
+                        player.closeInventory();
+                        plugin.visits().go(player, t.name());
+                    });
+            // Keep the skull texture on the icon we just built if the slot used a generic material.
+        }
+        if (targets.isEmpty()) {
+            view.set(22, icon(Material.BARRIER, plain("No islands to visit", NamedTextColor.RED), List.of(
+                    plain("No other player has an island yet.", NamedTextColor.GRAY))), null);
+        }
+        footer(view, player, () -> openTravel(player));
+        player.openInventory(view.inventory);
+        // Re-apply skulls: icon() may not copy a skull owner, so set heads directly.
+        i = 0;
+        for (Visits.Resolved t : targets) {
+            if (i >= slots.length) {
+                break;
+            }
+            ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+            org.bukkit.inventory.meta.SkullMeta meta = (org.bukkit.inventory.meta.SkullMeta) head.getItemMeta();
+            meta.setOwningPlayer(plugin.getServer().getOfflinePlayer(t.id()));
+            meta.displayName(plain(t.name(), NamedTextColor.YELLOW));
+            String status = t.online() ? "Online" : "Offline";
+            NamedTextColor statusColor = t.online() ? NamedTextColor.GREEN : NamedTextColor.GRAY;
+            meta.lore(List.of(
+                    plain(status, statusColor),
+                    plain("Guest visit: walk only (Booster flight still works).", NamedTextColor.GRAY),
+                    Component.empty(), click("Click to visit!")));
+            head.setItemMeta(meta);
+            int slot = slots[i++];
+            view.inventory.setItem(slot, head);
+        }
     }
 
     private void warp(Player player, Zones.District d) {

@@ -230,8 +230,9 @@ final class TabList implements Listener {
 
     private Component playerRow(Player p) {
         int level = Skills.skyblockLevel(plugin.profiles().get(p.getUniqueId()));
+        NamedTextColor name = plugin.stats() != null ? plugin.stats().nameColor(p) : NamedTextColor.GRAY;
         return t("[", NamedTextColor.DARK_GRAY).append(t(String.valueOf(level), Skills.levelColor(level)))
-                .append(t("] ", NamedTextColor.DARK_GRAY)).append(t(p.getName(), NamedTextColor.WHITE));
+                .append(t("] ", NamedTextColor.DARK_GRAY)).append(t(p.getName(), name));
     }
 
     Component[] rows(Player viewer) {
@@ -315,19 +316,28 @@ final class TabList implements Listener {
 
     private void header(Player player) {
         Component header = Component.text("You are playing on ", NamedTextColor.AQUA)
-                .append(Component.text("CATHARSIS", NamedTextColor.YELLOW).decoration(TextDecoration.BOLD, true))
-                .append(Component.newline());
+                .append(Component.text("CATHARSIS", NamedTextColor.YELLOW).decoration(TextDecoration.BOLD, true));
+        if (plugin.auth() != null && plugin.auth().isDev(player)) {
+            header = header.append(Component.text("  [DEV]", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
+        }
+        header = header.append(Component.newline());
+        List<Component> parts = new ArrayList<>();
+        if (plugin.cookies() != null && plugin.cookies().active(player)) {
+            Profile profile = plugin.profiles().get(player.getUniqueId());
+            long remain = profile.cookieUntil - System.currentTimeMillis();
+            parts.add(Component.text("Booster: " + Cookies.left(remain), NamedTextColor.AQUA));
+        }
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            String n = effect.getType().getKey().getKey().replace('_', ' ');
+            parts.add(Component.text(Character.toUpperCase(n.charAt(0)) + n.substring(1), NamedTextColor.GRAY));
+        }
         Component effects;
-        Collection<PotionEffect> active = player.getActivePotionEffects();
-        if (active.isEmpty()) {
+        if (parts.isEmpty()) {
             effects = Component.text("No effects are active.", NamedTextColor.GRAY);
         } else {
-            effects = Component.empty();
-            boolean first = true;
-            for (PotionEffect effect : active) {
-                String n = effect.getType().getKey().getKey().replace('_', ' ');
-                effects = effects.append(Component.text((first ? "" : ", ") + Character.toUpperCase(n.charAt(0)) + n.substring(1), NamedTextColor.GRAY));
-                first = false;
+            effects = parts.get(0);
+            for (int i = 1; i < parts.size(); i++) {
+                effects = effects.append(Component.text(", ", NamedTextColor.GRAY)).append(parts.get(i));
             }
         }
         Component footer = Component.newline()

@@ -174,8 +174,9 @@ final class Chat implements Listener {
         boolean dev = plugin.auth() != null && plugin.auth().isDev(source);
         boolean boost = !dev && plugin.cookies() != null && plugin.cookies().active(source);
         Component rank = (dev || source.isOp()) ? Component.text("[ADMIN] ", NamedTextColor.RED) : Component.empty();
-        NamedTextColor nameColor = dev ? NamedTextColor.RED : boost ? NamedTextColor.GOLD : NamedTextColor.GRAY;
-        NamedTextColor body = dev || source.isOp() ? NamedTextColor.WHITE : NamedTextColor.GRAY;
+        NamedTextColor nameColor = dev ? NamedTextColor.RED : boost ? NamedTextColor.AQUA : NamedTextColor.GRAY;
+        // Hypixel: ranked chat body is white, unranked is gray. Booster and /dev count as ranked here.
+        NamedTextColor body = dev || boost || source.isOp() ? NamedTextColor.WHITE : NamedTextColor.GRAY;
         event.renderer((player, displayName, message, viewer) -> prefix.append(rank)
                 .append(Component.text(player.getName(), nameColor))
                 .append(Component.text(": ", body))

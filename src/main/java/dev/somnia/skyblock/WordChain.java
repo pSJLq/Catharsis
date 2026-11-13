@@ -263,6 +263,11 @@ final class WordChain implements Listener {
             return;
         }
         Block block = event.getBlock();
+        if (plugin.visits() != null && !plugin.visits().mayEdit(player, block.getLocation())) {
+            event.setCancelled(true);
+            plugin.visits().deny(player);
+            return;
+        }
         if (block.getState() instanceof Container || block.getType() == Material.ENDER_CHEST) {
             event.setCancelled(true);
             return;
@@ -377,6 +382,11 @@ final class WordChain implements Listener {
         if (plugin.hold().offchain(player)) {
             return;
         }
+        if (plugin.visits() != null && !plugin.visits().mayEdit(player, event.getBlockPlaced().getLocation())) {
+            event.setCancelled(true);
+            plugin.visits().deny(player);
+            return;
+        }
         ItemStack hand = event.getItemInHand();
         if (hand == null || hand.getType().isAir()) {
             event.setCancelled(true);
@@ -439,6 +449,13 @@ final class WordChain implements Listener {
     public void onDrop(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
         if (plugin.hold().offchain(player)) {
+            return;
+        }
+        if (plugin.visits() != null && (plugin.visits().isGuest(player) || !plugin.visits().mayEdit(player, player.getLocation()))) {
+            event.setCancelled(true);
+            if (plugin.visits().isGuest(player)) {
+                plugin.visits().deny(player);
+            }
             return;
         }
         event.setCancelled(true);

@@ -28,6 +28,10 @@ final class ProfileStore {
         return cache.computeIfAbsent(uuid, this::load);
     }
 
+    boolean exists(UUID uuid) {
+        return cache.containsKey(uuid) || file(uuid).exists();
+    }
+
     private static double[] doubles(java.util.List<Double> list, int size) {
         if (list == null || list.size() < size) {
             return null;

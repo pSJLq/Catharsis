@@ -194,14 +194,25 @@ final class Skills implements Listener {
         return skyblockXp(p) / 100;
     }
 
+    /**
+     * Prefix color for the SkyBlock Level number, from
+     * https://hypixelskyblock.minecraft.wiki/w/SkyBlock_Levels (and Century Party Invitation).
+     * Brackets stay dark gray. Cyan is {@code DARK_AQUA} (§3); pink is {@code LIGHT_PURPLE}.
+     */
     static NamedTextColor levelColor(int level) {
+        if (level >= 480) return NamedTextColor.DARK_RED;
+        if (level >= 440) return NamedTextColor.RED;
+        if (level >= 400) return NamedTextColor.GOLD;
+        if (level >= 360) return NamedTextColor.DARK_PURPLE;
+        if (level >= 320) return NamedTextColor.LIGHT_PURPLE;
+        if (level >= 280) return NamedTextColor.BLUE;
+        if (level >= 240) return NamedTextColor.DARK_AQUA;
         if (level >= 200) return NamedTextColor.AQUA;
         if (level >= 160) return NamedTextColor.DARK_GREEN;
         if (level >= 120) return NamedTextColor.GREEN;
         if (level >= 80) return NamedTextColor.YELLOW;
         if (level >= 40) return NamedTextColor.WHITE;
-        if (level >= 10) return NamedTextColor.GRAY;
-        return NamedTextColor.DARK_GRAY;
+        return NamedTextColor.GRAY;
     }
 
     /**

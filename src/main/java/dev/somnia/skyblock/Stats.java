@@ -361,8 +361,9 @@ final class Stats implements Listener {
     }
 
     /**
-     * Tab list name color: red while /dev is on, gold while a Booster buff is active, otherwise white.
-     * Call this when the buff or dev mode changes so the tab list reverts in the same tick.
+     * List/chat name color: red while /dev is on, aqua while a Booster buff is active, otherwise gray
+     * (Hypixel unranked). Call this when the buff or dev mode changes so the tab list reverts in the same tick.
+     * The custom tab grid in {@link TabList} is what the client actually shows.
      */
     void refreshListName(Player player) {
         if (player == null || !player.isOnline()) {
@@ -379,15 +380,15 @@ final class Stats implements Listener {
         }
     }
 
-    /** Dev red wins over Booster gold. Normal players stay white (same as the previous tab default). */
+    /** Dev red wins over Booster aqua. Normal players stay gray (Hypixel unranked). */
     NamedTextColor nameColor(Player player) {
         if (plugin.auth() != null && plugin.auth().isDev(player)) {
             return NamedTextColor.RED;
         }
         if (plugin.cookies() != null && plugin.cookies().active(player)) {
-            return NamedTextColor.GOLD;
+            return NamedTextColor.AQUA;
         }
-        return NamedTextColor.WHITE;
+        return NamedTextColor.GRAY;
     }
 
     private void tick() {

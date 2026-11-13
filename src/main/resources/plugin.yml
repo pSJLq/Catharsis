@@ -35,6 +35,9 @@ commands:
   hub:
     description: Go to the hub
     usage: /hub
+  visit:
+    description: Visit another player's island as a guest
+    usage: /visit <player>
   craft:
     description: Compress a resource into an enchanted item
     usage: /craft cobble|oak|void

@@ -17,6 +17,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
+import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TextDisplay;
@@ -395,6 +396,7 @@ final class Mobs implements Listener {
     public void onDeath(EntityDeathEvent event) {
         LivingEntity mob = event.getEntity();
         if (!isMob(mob)) {
+            islandKill(event);
             return;
         }
         event.getDrops().clear();
@@ -416,6 +418,54 @@ final class Mobs implements Listener {
             reward(killer, mob, type);
         }
         plugin.arena().onMobDeath(mob);
+    }
+
+    /**
+     * Natural island hostiles: no world drops or vanilla XP orbs (those would skip the bag).
+     * Combat XP goes through {@link Stats#addCombatXp} (gas-gated). Loot goes through the bag or stash.
+     * Hub and arena tagged mobs stay on {@link #reward}.
+     */
+    private void islandKill(EntityDeathEvent event) {
+        LivingEntity mob = event.getEntity();
+        if (plugin.islands() == null || plugin.islands().world() == null || !mob.getWorld().equals(plugin.islands().world())) {
+            return;
+        }
+        if (!(mob instanceof Monster)) {
+            return;
+        }
+        List<ItemStack> drops = new ArrayList<>(event.getDrops());
+        event.getDrops().clear();
+        event.setDroppedExp(0);
+        Player killer = mob.getKiller();
+        if (killer == null) {
+            return;
+        }
+        long xp = islandCombatXp(mob);
+        if (xp > 0) {
+            plugin.stats().addCombatXp(killer, xp);
+        }
+        boolean changed = false;
+        for (ItemStack stack : drops) {
+            if (stack == null || stack.getType().isAir() || stack.getAmount() <= 0) {
+                continue;
+            }
+            String key = stack.getType().getKey().toString();
+            plugin.market().giveOrStash(killer.getUniqueId(), key, stack.getAmount(), false);
+            Collects.add(plugin, killer, stack.getType(), stack.getAmount());
+            changed = true;
+        }
+        if (changed) {
+            plugin.market().commit(killer);
+        }
+    }
+
+    /** Lv 1 values from current Hypixel SkyBlock wiki mob pages (Combat XP). */
+    private static long islandCombatXp(LivingEntity mob) {
+        return switch (mob.getType()) {
+            case ENDERMAN -> 8;
+            case CREEPER, SKELETON, STRAY, ZOMBIE, DROWNED, HUSK, SPIDER, CAVE_SPIDER, WITCH, SLIME -> 6;
+            default -> 5;
+        };
     }
 
     private void reward(Player killer, LivingEntity mob, Type type) {

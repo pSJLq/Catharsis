@@ -237,10 +237,19 @@ final class SkyListener implements Listener {
     @EventHandler
     public void onMove(PlayerMoveEvent event) {
         Location to = event.getTo();
-        if (to == null || to.getY() >= 40 || event.getFrom().getBlockY() == to.getBlockY()) {
+        if (to == null || to.getWorld() == null || plugin.islands() == null || plugin.islands().world() == null
+                || !to.getWorld().equals(plugin.islands().world())) {
             return;
         }
-        if (to.getWorld() == null || !to.getWorld().equals(plugin.islands().world())) {
+        Location from = event.getFrom();
+        if (from.getBlockX() == to.getBlockX() && from.getBlockY() == to.getBlockY() && from.getBlockZ() == to.getBlockZ()) {
+            return;
+        }
+        if (plugin.visits() != null) {
+            plugin.visits().bounce(event.getPlayer(), to);
+            return;
+        }
+        if (to.getY() >= 40) {
             return;
         }
         Profile profile = plugin.profiles().get(event.getPlayer().getUniqueId());
@@ -280,12 +289,33 @@ final class SkyListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onPortalFrameExplode(org.bukkit.event.entity.EntityExplodeEvent event) {
+        if (plugin.islands() != null && plugin.islands().world() != null
+                && event.getEntity().getWorld().equals(plugin.islands().world())) {
+            event.blockList().clear();
+            return;
+        }
         event.blockList().removeIf(b -> plugin.islands().inPortalFrame(b));
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onPortalFrameBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) {
+        if (plugin.islands() != null && plugin.islands().world() != null
+                && event.getBlock().getWorld().equals(plugin.islands().world())) {
+            event.blockList().clear();
+            return;
+        }
         event.blockList().removeIf(b -> plugin.islands().inPortalFrame(b));
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onIslandEntityChangeBlock(org.bukkit.event.entity.EntityChangeBlockEvent event) {
+        if (event.getEntity() instanceof org.bukkit.entity.Player) {
+            return;
+        }
+        if (plugin.islands() != null && plugin.islands().world() != null
+                && event.getBlock().getWorld().equals(plugin.islands().world())) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(ignoreCancelled = true)

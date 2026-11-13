@@ -82,6 +82,9 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
             return plugin.islands().reset(player, profile, args.length > 1 && args[1].equalsIgnoreCase("confirm"));
         }
         if (name.equals("island")) {
+            if (plugin.visits() != null) {
+                plugin.visits().end(player);
+            }
             plugin.islands().ensureIsland(profile);
             plugin.islands().teleport(player, profile);
             player.setRespawnLocation(plugin.islands().home(profile), true);
@@ -90,11 +93,17 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
             return true;
         }
         if (name.equals("hub")) {
+            if (plugin.visits() != null) {
+                plugin.visits().end(player);
+            }
             plugin.islands().ensureIsland(profile);
             plugin.hub().teleport(player);
             plugin.hub().greet(player, profile);
             player.sendMessage(Component.text("You are in the hub. /is goes home.", NamedTextColor.GREEN));
             return true;
+        }
+        if (name.equals("visit")) {
+            return plugin.visits().go(player, args.length >= 1 ? args[0] : "");
         }
         if (args.length != 1) {
             player.sendMessage(Component.text("Use /craft cobble, /craft oak, or /craft void.", NamedTextColor.YELLOW));
@@ -214,6 +223,10 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (command.getName().equalsIgnoreCase("visit")) {
+            String prefix = args.length == 0 ? "" : args[args.length - 1];
+            return args.length <= 1 ? plugin.visits().complete(prefix) : List.of();
+        }
         if (command.getName().equalsIgnoreCase("trade")) {
             return List.of();
         }

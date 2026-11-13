@@ -58,23 +58,23 @@ final class IslandManager {
         if (world == null) {
             throw new IllegalStateException("Could not create the skyblock world");
         }
-        world.setGameRule(GameRule.DO_MOB_SPAWNING, false);
-        world.setGameRule(GameRule.SPAWN_MONSTERS, false);
+        world.setGameRule(GameRule.DO_MOB_SPAWNING, true);
+        world.setGameRule(GameRule.SPAWN_MONSTERS, true);
+        world.setGameRule(GameRule.MOB_GRIEFING, false);
         world.setGameRule(GameRule.DO_PATROL_SPAWNING, false);
         world.setGameRule(GameRule.DO_TRADER_SPAWNING, false);
         world.setGameRule(GameRule.DO_INSOMNIA, false);
         world.setGameRule(GameRule.DO_WEATHER_CYCLE, false);
-        world.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
+        world.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, true);
         world.setGameRule(GameRule.KEEP_INVENTORY, true);
         world.setGameRule(GameRule.ANNOUNCE_ADVANCEMENTS, false);
         world.setGameRule(GameRule.DO_IMMEDIATE_RESPAWN, true);
         world.setGameRule(GameRule.SPAWN_RADIUS, 0);
         world.setGameRule(GameRule.LOCATOR_BAR, false);
-        world.setSpawnFlags(false, false);
+        world.setSpawnFlags(true, true);
         world.setDifficulty(Difficulty.EASY);
         world.setStorm(false);
         world.setThundering(false);
-        world.setTime(6000);
         world.setClearWeatherDuration(Integer.MAX_VALUE);
         nextIndex = plugin.getConfig().getInt("next-island", 0);
         template = IslandTemplate.load(new java.io.File(plugin.getDataFolder(), "island/starter.sbh"), plugin.getLogger());
