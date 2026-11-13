@@ -53,7 +53,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Buff: /ah /bz /bank anywhere, sell to the Merchant from the SkyBlock menu, flight on your own island, and the
  * admin wallet pays the player's Shannon gas (WalletService.sponsored). The item is a normal bag item, so it can
  * be resold on the Bazaar for STT; merchants never buy it for coins.
- * Also shows the "Out of STT" center message to players with 0 STT and no buff.
+ * Also shows the "Out of STT" center message to players whose Shannon purse is below the gas fee cap and who have no buff.
  */
 final class Cookies implements Listener, CommandExecutor, TabCompleter {
     static final String ID = "booster_cookie";
@@ -568,7 +568,10 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             });
         }
         BigInteger wei = sttWei.get(id);
-        if (wei == null || wei.signum() > 0) {
+        if (wei == null) {
+            wei = plugin.wallets().cachedBalance(profile.wallet);
+        }
+        if (wei == null || wei.compareTo(plugin.wallets().gasFeeCap()) >= 0) {
             clearOutOfStt(player);
             return;
         }

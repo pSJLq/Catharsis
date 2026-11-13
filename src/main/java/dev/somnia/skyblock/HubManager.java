@@ -1607,8 +1607,7 @@ final class HubManager implements Listener {
             plugin.skills().add(player, Skills.Skill.FORAGING, 1);
             return;
         } else if (grassXp(type) > 0) {
-            // Grass and ferns: Foraging XP only, no item and no collection.
-            plugin.skills().add(player, Skills.Skill.FORAGING, grassXp(type));
+            // Grass and ferns are not a Hypixel Foraging source (wiki: flowers +1, logs +6). No item, no XP.
             return;
         } else if (isFlower(type)) {
             plugin.skills().add(player, Skills.Skill.FORAGING, 1);
@@ -1794,7 +1793,7 @@ final class HubManager implements Listener {
                 || t == Material.PEONY || t == Material.ROSE_BUSH;
     }
 
-    /** Foraging XP for grass and ferns (no item): 1 for short grass / fern, 2 for tall grass / large fern, else 0. */
+    /** 1/2 for short grass or fern / tall grass or large fern, else 0. Used to skip bag drops; these blocks grant no Foraging XP. */
     static int grassXp(Material t) {
         return switch (t) {
             case SHORT_GRASS, FERN -> 1;

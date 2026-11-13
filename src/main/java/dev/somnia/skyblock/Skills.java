@@ -212,6 +212,9 @@ final class Skills implements Listener {
         if (tenths <= 0) {
             return;
         }
+        if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
+            return;
+        }
         if (tenths % 10 == 0) {
             add(player, skill, tenths / 10, null);
             return;
@@ -241,6 +244,9 @@ final class Skills implements Listener {
             return;
         }
         Profile profile = plugin.profiles().get(player.getUniqueId());
+        if (plugin.wallets().shortOnGas(profile)) {
+            return;
+        }
         int before;
         int after;
         long now;

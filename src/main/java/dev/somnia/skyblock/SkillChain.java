@@ -423,8 +423,9 @@ final class SkillChain implements Listener {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if (balance.signum() == 0 && (plugin.cookies() == null || !plugin.cookies().active(profile))) {
-                    throw new IllegalStateException("Purse has 0 STT.");
+                if ((plugin.cookies() == null || !plugin.cookies().active(profile))
+                        && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
+                    throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
                 String hash = plugin.wallets().submitTo(profile, to, WalletService.resetProfile(), BigInteger.ZERO);
                 plugin.getLogger().info("Skills reset sent for " + profile.wallet + ": " + hash);
@@ -503,8 +504,9 @@ final class SkillChain implements Listener {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if (balance.signum() == 0 && (plugin.cookies() == null || !plugin.cookies().active(profile))) {
-                    throw new IllegalStateException("Purse has 0 STT.");
+                if ((plugin.cookies() == null || !plugin.cookies().active(profile))
+                        && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
+                    throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
                 String hash = plugin.wallets().submitTo(profile, contract(), WalletService.applyXp(s, sa, c, ca), BigInteger.ZERO);
                 long[] txXp = new long[SKILLS];

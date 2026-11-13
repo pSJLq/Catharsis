@@ -130,6 +130,11 @@ final class WordChain implements Listener {
             try {
                 words = plugin.wallets().wordsOf(profile.wallet);
                 combat = plugin.wallets().combatOf(profile.wallet);
+                try {
+                    plugin.wallets().balanceWei(profile.wallet);
+                } catch (Exception ignored) {
+                    // Gate stays optimistic until a later balance read.
+                }
             } catch (Exception exception) {
                 plugin.getServer().getScheduler().runTask(plugin, () -> loginFailed(player, fromCreative, exception));
                 return;
@@ -267,6 +272,11 @@ final class WordChain implements Listener {
             event.setCancelled(true);
             return;
         }
+        if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
+            event.setCancelled(true);
+            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+            return;
+        }
         List<ItemStack> drops = new ArrayList<>(block.getDrops(player.getInventory().getItemInMainHand(), player));
         Block lowerHalf = lowerHalf(block);
         if (lowerHalf != null) {
@@ -274,7 +284,7 @@ final class WordChain implements Listener {
             drops = new ArrayList<>(lowerHalf.getDrops(player.getInventory().getItemInMainHand(), player));
         }
         if (HubManager.grassXp(block.getType()) > 0) {
-            drops.clear(); // grass and ferns pay Foraging XP only: no item, so no bag write
+            drops.clear(); // grass and ferns: no bag item (and no Foraging XP; Hypixel grants XP for flowers and logs only)
         }
         Map<Integer, Integer> totals = new HashMap<>();
         for (ItemStack drop : drops) {
@@ -385,6 +395,11 @@ final class WordChain implements Listener {
         Seat seat = seats.get(player.getUniqueId());
         if (seat == null || !seat.loaded) {
             event.setCancelled(true);
+            return;
+        }
+        if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
+            event.setCancelled(true);
+            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
             return;
         }
         BigInteger packed = pack(hand);

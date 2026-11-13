@@ -60,6 +60,12 @@ final class WalletService {
     private final Object sendLock = new Object();
     private final Map<String, Lane> lanes = new ConcurrentHashMap<>();
     private final Map<String, BigInteger> castGas = new ConcurrentHashMap<>();
+    /** Last Shannon purse balances, keyed by lower-case address. Filled on every Shannon balance read. */
+    private final Map<String, BigInteger> balanceCache = new ConcurrentHashMap<>();
+    /** Last computed Shannon gas fee cap (estimate * maxFee) from a write attempt. */
+    private volatile BigInteger lastFeeWei;
+    /** Conservative gas units used only when no write has computed a fee yet (main-thread, no RPC). */
+    private static final BigInteger DEFAULT_GAS_UNITS = BigInteger.valueOf(450_000L);
 
     WalletService(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
@@ -132,8 +138,7 @@ final class WalletService {
     }
 
     String balance(String address) throws IOException {
-        BigInteger wei = web3.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().getBalance();
-        return format(wei);
+        return format(readBalance(address));
     }
 
     /** Sends STT and waits for the receipt; returns the hash only when status is 1, throws otherwise. */
@@ -149,13 +154,14 @@ final class WalletService {
         }
         BigInteger value = Convert.toWei(amount, Convert.Unit.ETHER).toBigIntegerExact();
         Credentials credentials = credentials(profile);
-        BigInteger balance = web3.ethGetBalance(credentials.getAddress(), DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger balance = readBalance(credentials.getAddress());
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;
         // Somnia prices a plain transfer to a never-funded address far above 21000 (about 631k gas), so the limit
         // always comes from eth_estimateGas + 20%; a hardcoded 21000 made those withdraws revert out of gas.
         BigInteger gas = transferGas(credentials.getAddress(), to, value);
         BigInteger fee = gas.multiply(maxFee);
+        noteFee(fee);
         if (balance.compareTo(value.add(fee)) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This needs " + format(value) + " plus " + format(fee) + " STT for gas.");
         }
@@ -670,8 +676,9 @@ final class WalletService {
                 gas = padded;
             }
         }
-        BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger balance = readBalance(from);
         BigInteger fee = gas.multiply(maxFee);
+        noteFee(fee);
         balance = sponsored(profile, from, balance, fee, fee);
         if (balance.compareTo(fee) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This signature can cost up to " + format(fee) + " STT.");
@@ -972,8 +979,9 @@ final class WalletService {
         BigInteger limit = estimateLimit(credentials.getAddress(), to, data, gasLimit);
         BigInteger maxFee = maxFee();
         BigInteger priority = PRIORITY;
-        BigInteger balance = web3.ethGetBalance(credentials.getAddress(), DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger balance = readBalance(credentials.getAddress());
         BigInteger fee = limit.multiply(maxFee);
+        noteFee(fee);
         balance = sponsored(profile, credentials.getAddress(), balance, fee, fee);
         if (balance.compareTo(fee) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT. This signature can cost up to " + format(fee) + " STT.");
@@ -1162,7 +1170,69 @@ final class WalletService {
     }
 
     BigInteger balanceWei(String address) throws IOException {
-        return web3.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().getBalance();
+        return readBalance(address);
+    }
+
+    /** Shannon eth_getBalance plus the in-memory cache used by the main-thread gas gate. */
+    private BigInteger readBalance(String address) throws IOException {
+        BigInteger wei = web3.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().getBalance();
+        noteBalance(address, wei);
+        return wei;
+    }
+
+    void noteBalance(String address, BigInteger wei) {
+        if (address == null || address.isBlank() || wei == null) {
+            return;
+        }
+        balanceCache.put(address.toLowerCase(Locale.ROOT), wei);
+    }
+
+    BigInteger cachedBalance(String address) {
+        if (address == null || address.isBlank()) {
+            return null;
+        }
+        return balanceCache.get(address.toLowerCase(Locale.ROOT));
+    }
+
+    private void noteFee(BigInteger fee) {
+        if (fee != null && fee.signum() > 0) {
+            lastFeeWei = fee;
+        }
+    }
+
+    /**
+     * Last observed Shannon write fee, or a conservative default from the cached gas price / 6 gwei floor
+     * and chain.max-fee-gwei. Safe on the main thread: no RPC.
+     */
+    BigInteger gasFeeCap() {
+        BigInteger last = lastFeeWei;
+        if (last != null && last.signum() > 0) {
+            return last;
+        }
+        BigInteger cap = BigInteger.valueOf(Math.max(6, plugin.getConfig().getInt("chain.max-fee-gwei", 20))).multiply(GWEI);
+        BigInteger price = gasPriceCache == null ? FEE_FLOOR : gasPriceCache.multiply(BigInteger.valueOf(5)).divide(BigInteger.valueOf(4)).max(gasPriceCache.add(PRIORITY)).max(FEE_FLOOR);
+        if (price.compareTo(cap) > 0) {
+            price = cap;
+        }
+        return DEFAULT_GAS_UNITS.multiply(price);
+    }
+
+    /**
+     * Main-thread safe. True when the cached Shannon purse is below the gas fee cap and a Booster Cookie
+     * is not sponsoring gas. Unknown cache is optimistic (false) until a balance read lands.
+     */
+    boolean shortOnGas(Profile profile) {
+        if (profile == null || profile.wallet == null || profile.wallet.isBlank()) {
+            return false;
+        }
+        if (plugin.cookies() != null && plugin.cookies().active(profile)) {
+            return false;
+        }
+        BigInteger bal = cachedBalance(profile.wallet);
+        if (bal == null) {
+            return false;
+        }
+        return bal.compareTo(gasFeeCap()) < 0;
     }
 
     List<Type> viewRealm(Function function) throws IOException {
@@ -1237,8 +1307,9 @@ final class WalletService {
         if (gas.compareTo(REALM_GAS_CAP) > 0) {
             gas = REALM_GAS_CAP;
         }
-        BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger balance = readBalance(from);
         BigInteger need = value.add(gas.multiply(maxFee));
+        noteFee(gas.multiply(maxFee));
         balance = sponsored(profile, from, balance, need, gas.multiply(maxFee));
         if (balance.compareTo(need) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT, this needs up to " + format(need) + " STT. /deposit shows your purse.");
@@ -1293,7 +1364,8 @@ final class WalletService {
         if (gas.compareTo(BigInteger.valueOf(30_000_000L)) > 0) {
             throw new IllegalStateException("Deploy needs " + gas + " gas.");
         }
-        BigInteger balance = web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger balance = readBalance(from);
+        noteFee(gas.multiply(maxFee));
         balance = sponsored(profile, from, balance, gas.multiply(maxFee), gas.multiply(maxFee));
         if (balance.compareTo(gas.multiply(maxFee)) < 0) {
             throw new IllegalStateException("Purse has " + format(balance) + " STT, the deploy needs up to " + format(gas.multiply(maxFee)) + " STT.");
@@ -1461,7 +1533,7 @@ final class WalletService {
                 throw new IllegalStateException("top-up " + hash + " did not land");
             }
             plugin.getLogger().info("Gas sponsor: " + format(missing) + " STT to " + from + " (Booster Cookie) " + hash);
-            return web3.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+            return readBalance(from);
         } catch (Exception exception) {
             plugin.getLogger().warning("Gas sponsor failed for " + from + ": " + exception.getMessage());
             return balance;
