@@ -360,6 +360,36 @@ final class Stats implements Listener {
         dirty.add(player.getUniqueId());
     }
 
+    /**
+     * Tab list name color: red while /dev is on, gold while a Booster buff is active, otherwise white.
+     * Call this when the buff or dev mode changes so the tab list reverts in the same tick.
+     */
+    void refreshListName(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        Profile tab = plugin.profiles().get(player.getUniqueId());
+        int sbLevel = Skills.skyblockLevel(tab);
+        Component listName = Component.text("[", NamedTextColor.DARK_GRAY)
+                .append(Component.text(String.valueOf(sbLevel), Skills.levelColor(sbLevel)))
+                .append(Component.text("] ", NamedTextColor.DARK_GRAY))
+                .append(Component.text(player.getName(), nameColor(player)));
+        if (!listName.equals(player.playerListName())) {
+            player.playerListName(listName);
+        }
+    }
+
+    /** Dev red wins over Booster gold. Normal players stay white (same as the previous tab default). */
+    NamedTextColor nameColor(Player player) {
+        if (plugin.auth() != null && plugin.auth().isDev(player)) {
+            return NamedTextColor.RED;
+        }
+        if (plugin.cookies() != null && plugin.cookies().active(player)) {
+            return NamedTextColor.GOLD;
+        }
+        return NamedTextColor.WHITE;
+    }
+
     private void tick() {
         ticks++;
         long now = System.currentTimeMillis();
@@ -392,16 +422,8 @@ final class Stats implements Listener {
                 if (Math.abs(player.getWalkSpeed() - walk) > 0.0001f) {
                     player.setWalkSpeed(walk);
                 }
-                // Tab list: [SkyBlock Level] name, coloured like the chat prefix.
-                Profile tab = plugin.profiles().get(id);
-                int sbLevel = Skills.skyblockLevel(tab);
-                Component listName = Component.text("[", NamedTextColor.DARK_GRAY)
-                        .append(Component.text(String.valueOf(sbLevel), Skills.levelColor(sbLevel)))
-                        .append(Component.text("] ", NamedTextColor.DARK_GRAY))
-                        .append(Component.text(player.getName(), NamedTextColor.WHITE));
-                if (!listName.equals(player.playerListName())) {
-                    player.playerListName(listName);
-                }
+                // Tab list: [SkyBlock Level] name. Name is red in /dev, gold with a Booster, otherwise white.
+                refreshListName(player);
             }
             if (ticks % 4 == 0 && dirty.remove(id)) {
                 Profile profile = plugin.profiles().get(id);

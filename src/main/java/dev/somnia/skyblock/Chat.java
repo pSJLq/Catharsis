@@ -171,11 +171,14 @@ final class Chat implements Listener {
         Component prefix = Component.text("[", NamedTextColor.DARK_GRAY)
                 .append(Component.text(level, Skills.levelColor(level)))
                 .append(Component.text("] ", NamedTextColor.DARK_GRAY));
-        Component rank = source.isOp() ? Component.text("[ADMIN] ", NamedTextColor.RED) : Component.empty();
-        NamedTextColor nameColor = source.isOp() ? NamedTextColor.RED : NamedTextColor.GRAY;
+        boolean dev = plugin.auth() != null && plugin.auth().isDev(source);
+        boolean boost = !dev && plugin.cookies() != null && plugin.cookies().active(source);
+        Component rank = (dev || source.isOp()) ? Component.text("[ADMIN] ", NamedTextColor.RED) : Component.empty();
+        NamedTextColor nameColor = dev ? NamedTextColor.RED : boost ? NamedTextColor.GOLD : NamedTextColor.GRAY;
+        NamedTextColor body = dev || source.isOp() ? NamedTextColor.WHITE : NamedTextColor.GRAY;
         event.renderer((player, displayName, message, viewer) -> prefix.append(rank)
                 .append(Component.text(player.getName(), nameColor))
-                .append(Component.text(": ", source.isOp() ? NamedTextColor.WHITE : NamedTextColor.GRAY))
-                .append(message.colorIfAbsent(source.isOp() ? NamedTextColor.WHITE : NamedTextColor.GRAY)));
+                .append(Component.text(": ", body))
+                .append(message.colorIfAbsent(body)));
     }
 }

@@ -166,8 +166,8 @@ final class Market implements Listener {
         product("revenant_flesh", "skyblock:revenant_flesh", "Barrow Flesh", 1);
         product("wolf_tooth", "skyblock:wolf_tooth", "Thornkeep Fang", 1);
         product("colosseum_sigil", "skyblock:colosseum_sigil", "Colosseum Sigil", 150);
-        // Sold for SOMI in /cookie; traded here for STT only. npc 0 = merchants never buy it for coins.
-        product(Cookies.ID, Cookies.KEY, "Booster Cookie", 0);
+        // Leftover Booster items only (purchase applies the buff directly). Traded here for STT only. npc 0 = merchants never buy it for coins.
+        product(Cookies.ID, Cookies.KEY, "Booster", 0);
 
         recipe("undead_sword", 150, Map.of(), 0);
         recipe("cleaver", 400, Map.of("minecraft:iron_ingot", 4), 2);

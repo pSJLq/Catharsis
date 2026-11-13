@@ -556,7 +556,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             case "login" -> login(player, args);
             case "changepassword" -> changePassword(player, args);
             case "dev" -> {
-                // Dev accounts only (after /login): /dev cookie opens the Booster Cookie test tools; also /dev while already in dev mode.
+                // Dev accounts only (after /login): /dev cookie opens the Booster test tools; also /dev while already in dev mode.
                 boolean tools = (args.length > 0 && args[0].equalsIgnoreCase("cookie")) || (args.length == 0 && isDev(player));
                 if (tools && isDevAccount(player) && authed.contains(player.getUniqueId())) {
                     plugin.cookies().openDev(player);
@@ -1001,6 +1001,9 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         }
         player.updateCommands();
         player.sendPlayerListHeader(Component.text("[DEV]", NamedTextColor.RED).decoration(TextDecoration.BOLD, true));
+        if (plugin.stats() != null) {
+            plugin.stats().refreshListName(player);
+        }
         player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Dev mode on: op and admin until /user, quit or restart.", NamedTextColor.GRAY)));
         plugin.getLogger().info("Mode switch: " + player.getName() + " -> dev (by " + by + ").");
     }
@@ -1030,6 +1033,9 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         player.setInvisible(false);
         player.sendPlayerListHeader(Component.empty());
         player.updateCommands();
+        if (plugin.stats() != null) {
+            plugin.stats().refreshListName(player);
+        }
         if (announce) {
             player.sendMessage(Component.text("User mode: you play like everyone else.", NamedTextColor.GREEN));
         }

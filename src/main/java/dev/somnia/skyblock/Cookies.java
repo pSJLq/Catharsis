@@ -48,11 +48,12 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Booster Cookie. Bought with SOMI on Somnia mainnet from the player's own purse (the same address as on
- * Shannon; /cookie shows it and its SOMI balance). Eating one adds 4 days of buff (stacks, counts down offline).
+ * Booster. Bought with SOMI on Somnia mainnet from the player's own purse (the same address as on
+ * Shannon; /cookie or /booster shows it and its SOMI balance). A confirmed purchase applies 4 days of buff
+ * at once (stacks, counts down offline) with no bag item and no onchain bag write.
  * Buff: /ah /bz /bank anywhere, sell to the Merchant from the SkyBlock menu, flight on your own island, and the
- * admin wallet pays the player's Shannon gas (WalletService.sponsored). The item is a normal bag item, so it can
- * be resold on the Bazaar for STT; merchants never buy it for coins.
+ * admin wallet pays the player's Shannon gas (WalletService.sponsored). A leftover Booster item (stash or /dev give)
+ * can still be eaten; merchants never buy it for coins.
  * Also shows the "Out of STT" center message to players whose Shannon purse is below the gas fee cap and who have no buff.
  */
 final class Cookies implements Listener, CommandExecutor, TabCompleter {
@@ -82,7 +83,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         this.main = Web3j.build(new HttpService(rpc));
         this.mainChainId = plugin.getConfig().getLong("cookie.mainnet-chain-id", 5031L);
         this.file = new File(plugin.getDataFolder(), "cookies.yml");
-        plugin.getLogger().info("Booster Cookie: " + priceText() + " SOMI on Somnia mainnet " + mainChainId + " (" + rpc + "), paid to " + receiver());
+        plugin.getLogger().info("Booster: " + priceText() + " SOMI on Somnia mainnet " + mainChainId + " (" + rpc + "), paid to " + receiver());
     }
 
     void start() {
@@ -139,7 +140,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
     }
 
     /**
-     * /ah, /bz, /bank (and the SkyBlock menu buttons that run them): as on Hypixel, only with the Cookie Buff.
+     * /ah, /bz, /bank (and the SkyBlock menu buttons that run them): as on Hypixel, only with the Booster buff.
      * Everyone else uses the hub NPC ({@code npc}: Auction Master, Bazaar Master, Banker), which opens the menu directly.
      */
     boolean allowAnywhere(Player player, String npc) {
@@ -148,8 +149,8 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         }
         player.sendMessage(Component.text("Visit the ", SOFT)
                 .append(Component.text(npc, SOFT_GOLD))
-                .append(Component.text(" in the Hub, or eat a ", SOFT))
-                .append(Component.text("Booster Cookie", NamedTextColor.GOLD)
+                .append(Component.text(" in the Hub, or buy a ", SOFT))
+                .append(Component.text("Booster", NamedTextColor.GOLD)
                         .clickEvent(ClickEvent.runCommand("/cookie"))
                         .hoverEvent(HoverEvent.showText(Component.text("Open /cookie", NamedTextColor.YELLOW))))
                 .append(Component.text(" to use this anywhere.", SOFT)));
@@ -161,7 +162,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
     void menuSell(Player player) {
         if (!active(player)) {
             player.closeInventory();
-            player.sendMessage(Component.text("Selling from the menu needs the Booster Cookie buff. See /cookie.", NamedTextColor.RED));
+            player.sendMessage(Component.text("Selling from the menu needs the Booster buff. See /cookie.", NamedTextColor.RED));
             return;
         }
         plugin.market().openMerchant(player, "Merchant");
@@ -176,7 +177,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         lore.add(SbMenu.plain("Price: ", NamedTextColor.GRAY).append(SbMenu.plain(priceText() + " SOMI", NamedTextColor.GOLD)));
         lore.add(Component.empty());
         lore.add(SbMenu.plain("Click to open!", NamedTextColor.YELLOW));
-        return SbMenu.icon(Material.COOKIE, SbMenu.plain("Booster Cookie", NamedTextColor.GOLD), lore);
+        return SbMenu.icon(Material.COOKIE, SbMenu.plain("Booster", NamedTextColor.GOLD), lore);
     }
 
     ItemStack sellIcon(Player player) {
@@ -184,7 +185,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         List<Component> lore = new ArrayList<>(SbMenu.wrap("Sell items to the Merchant for coins from anywhere.", NamedTextColor.GRAY));
         lore.add(Component.empty());
         lore.add(on ? SbMenu.plain("Click to open!", NamedTextColor.YELLOW)
-                : SbMenu.plain("Needs the Booster Cookie buff.", NamedTextColor.RED));
+                : SbMenu.plain("Needs the Booster buff.", NamedTextColor.RED));
         return SbMenu.icon(Material.GOLD_INGOT, SbMenu.plain("Sell to Merchant", NamedTextColor.GOLD), lore);
     }
 
@@ -215,15 +216,15 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
 
     void open(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
-        Market.View view = new Market.View(27, "Booster Cookie");
+        Market.View view = new Market.View(27, "Booster");
         ItemStack pane = Market.icon(Material.GRAY_STAINED_GLASS_PANE, " ", NamedTextColor.GRAY, List.of());
         for (int i = 0; i < 27; i++) {
             view.getInventory().setItem(i, pane);
         }
         long left = profile.cookieUntil - System.currentTimeMillis();
         List<Component> info = new ArrayList<>();
-        info.add(SbMenu.plain("Eat one for " + days() + " days of buff.", NamedTextColor.GRAY));
-        info.add(SbMenu.plain("More cookies add more time; the", NamedTextColor.GRAY));
+        info.add(SbMenu.plain("Buying one applies " + days() + " days of buff at once.", NamedTextColor.GRAY));
+        info.add(SbMenu.plain("Buying again adds more time; the", NamedTextColor.GRAY));
         info.add(SbMenu.plain("timer runs while you are offline too.", NamedTextColor.GRAY));
         info.add(Component.empty());
         info.add(SbMenu.plain("Buff:", NamedTextColor.GRAY));
@@ -234,8 +235,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         info.add(Component.empty());
         info.add(SbMenu.plain("Time left: ", NamedTextColor.GRAY).append(left > 0
                 ? SbMenu.plain(left(left), NamedTextColor.GREEN) : SbMenu.plain("not active", NamedTextColor.RED)));
-        info.add(SbMenu.plain("Resell spare cookies on the Bazaar for STT.", NamedTextColor.DARK_GRAY));
-        view.set(11, SbMenu.icon(Material.COOKIE, SbMenu.plain("Booster Cookie", NamedTextColor.GOLD), info), null);
+        view.set(11, SbMenu.icon(Material.COOKIE, SbMenu.plain("Booster", NamedTextColor.GOLD), info), null);
 
         List<Component> bal = new ArrayList<>();
         bal.add(SbMenu.plain("Your purse on Somnia mainnet:", NamedTextColor.GRAY));
@@ -291,7 +291,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         } else {
             lore.add(SbMenu.plain("Click to buy one!", NamedTextColor.YELLOW));
         }
-        return SbMenu.icon(Material.EMERALD, SbMenu.plain("Buy a Booster Cookie", NamedTextColor.GREEN), lore);
+        return SbMenu.icon(Material.EMERALD, SbMenu.plain("Buy a Booster", NamedTextColor.GREEN), lore);
     }
 
     private void tellAddress(Player player) {
@@ -302,7 +302,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
                 .clickEvent(ClickEvent.copyToClipboard(wallet))
                 .hoverEvent(HoverEvent.showText(Component.text("Click to copy", NamedTextColor.YELLOW)))
                 .append(Component.text("  [Copy]", NamedTextColor.GREEN, TextDecoration.BOLD).decoration(TextDecoration.UNDERLINED, false)));
-        player.sendMessage(Component.text("Send SOMI here on Somnia mainnet, then buy the cookie in /cookie for " + priceText() + " SOMI. This is the same address as your STT purse.", NamedTextColor.GRAY));
+        player.sendMessage(Component.text("Send SOMI here on Somnia mainnet, then buy a Booster in /cookie or /booster for " + priceText() + " SOMI. The buff applies as soon as the payment lands. This is the same address as your STT purse.", NamedTextColor.GRAY));
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             String text;
             try {
@@ -328,7 +328,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         return v.setScale(4, java.math.RoundingMode.DOWN).stripTrailingZeros().toPlainString();
     }
 
-    /** Pays the price from the purse on mainnet; the cookie goes into the bag only after the receipt says status 1. */
+    /** Pays the price from the purse on mainnet; the 4-day buff is applied as soon as the receipt says status 1. No bag item. */
     void buy(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         UUID id = player.getUniqueId();
@@ -337,11 +337,11 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             return;
         }
         if (!receiver().matches("(?i)0x[0-9a-f]{40}")) {
-            player.sendMessage(Component.text("Booster Cookie sales are not set up on this server yet.", NamedTextColor.RED));
+            player.sendMessage(Component.text("Booster sales are not set up on this server yet.", NamedTextColor.RED));
             return;
         }
         if (!buying.add(id)) {
-            player.sendMessage(Component.text("Your cookie purchase is already on its way.", NamedTextColor.YELLOW));
+            player.sendMessage(Component.text("Your Booster purchase is already on its way.", NamedTextColor.YELLOW));
             return;
         }
         player.sendMessage(Component.text("Paying " + priceText() + " SOMI on Somnia mainnet...", NamedTextColor.GRAY));
@@ -370,13 +370,13 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
                 String done = hash;
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     buying.remove(id);
-                    plugin.market().giveOrStash(id, KEY, 1, true);
-                    record(done, profile, "given");
+                    applyBuff(profile, Bukkit.getPlayer(id));
+                    record(done, profile, "applied");
                     Player online = Bukkit.getPlayer(id);
                     if (online != null) {
                         online.sendMessage(Component.text("You bought a ", NamedTextColor.GREEN)
-                                .append(Component.text("Booster Cookie", NamedTextColor.GOLD))
-                                .append(Component.text("! Right-click it to eat it.", NamedTextColor.GREEN)));
+                                .append(Component.text("Booster", NamedTextColor.GOLD))
+                                .append(Component.text("! Buff time left: " + left(Math.max(0, profile.cookieUntil - System.currentTimeMillis())), NamedTextColor.GREEN)));
                         online.sendMessage(Component.text("Mainnet tx: ", NamedTextColor.DARK_GRAY)
                                 .append(Component.text(done, NamedTextColor.GRAY).clickEvent(ClickEvent.openUrl("https://explorer.somnia.network/tx/" + done))
                                         .hoverEvent(HoverEvent.showText(Component.text("Open in the Somnia explorer", NamedTextColor.YELLOW)))));
@@ -385,12 +385,12 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
                 });
             } catch (Exception exception) {
                 String why = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-                plugin.getLogger().warning("Cookie purchase for " + profile.wallet + " failed: " + why);
+                plugin.getLogger().warning("Booster purchase for " + profile.wallet + " failed: " + why);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     buying.remove(id);
                     Player online = Bukkit.getPlayer(id);
                     if (online != null) {
-                        online.sendMessage(Component.text("Cookie not bought: " + why, NamedTextColor.RED));
+                        online.sendMessage(Component.text("Booster not bought: " + why, NamedTextColor.RED));
                     }
                 });
             }
@@ -408,6 +408,20 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             yaml.save(file);
         } catch (Exception exception) {
             plugin.getLogger().warning("Could not save cookies.yml: " + exception.getMessage());
+        }
+    }
+
+    /** Adds days() of buff (stacks; counts down offline). No bag write. */
+    void applyBuff(Profile profile, Player online) {
+        long now = System.currentTimeMillis();
+        profile.cookieUntil = Math.max(now, profile.cookieUntil) + days() * DAY;
+        plugin.profiles().save(profile);
+        if (online != null && online.isOnline()) {
+            clearOutOfStt(online);
+            flight(online, profile, true);
+            if (plugin.stats() != null) {
+                plugin.stats().refreshListName(online);
+            }
         }
     }
 
@@ -442,20 +456,17 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             if (!ok) {
                 plugin.market().giveOrStash(id, KEY, 1, false);
                 if (online != null) {
-                    online.sendMessage(Component.text("The cookie stayed in your bag: the bag write did not land.", NamedTextColor.RED));
+                    online.sendMessage(Component.text("The Booster stayed in your bag: the bag write did not land.", NamedTextColor.RED));
                 }
                 return;
             }
             Profile profile = plugin.profiles().get(id);
-            long now = System.currentTimeMillis();
-            profile.cookieUntil = Math.max(now, profile.cookieUntil) + days() * DAY;
-            plugin.profiles().save(profile);
+            applyBuff(profile, online);
             if (online != null) {
                 online.playSound(online.getLocation(), Sound.ENTITY_GENERIC_EAT, 1f, 1f);
                 online.playSound(online.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.6f, 1.6f);
-                online.sendMessage(Component.text("You ate a Booster Cookie! ", NamedTextColor.GOLD)
-                        .append(Component.text("Buff time left: " + left(profile.cookieUntil - now), NamedTextColor.GREEN)));
-                clearOutOfStt(online);
+                online.sendMessage(Component.text("You ate a Booster! ", NamedTextColor.GOLD)
+                        .append(Component.text("Buff time left: " + left(Math.max(0, profile.cookieUntil - System.currentTimeMillis())), NamedTextColor.GREEN)));
             }
         };
         if (plugin.words() != null) {
@@ -481,6 +492,9 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             boolean buff = active(profile);
             flight(player, profile, buff);
             outOfStt(player, profile, buff, now);
+            if (plugin.stats() != null) {
+                plugin.stats().refreshListName(player);
+            }
         }
     }
 
@@ -579,7 +593,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
             Title title = Title.title(
                     Component.text("Out of STT", SOFT_GOLD),
                     Component.text("/deposit", SOFT_AQUA).append(Component.text(" to top up  •  ", SOFT))
-                            .append(Component.text("Booster Cookie", SOFT_GOLD))
+                            .append(Component.text("Booster", SOFT_GOLD))
                             .append(Component.text(" " + priceText() + " SOMI = free gas", SOFT)),
                     Title.Times.times(Duration.ZERO, Duration.ofSeconds(4), Duration.ofMillis(300)));
             player.showTitle(title);
@@ -597,7 +611,7 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
     /** Test tools for dev accounts: clear or apply the buff (profile only, nothing onchain), or take a cookie item. */
     void openDev(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
-        Market.View view = new Market.View(27, "Dev: Booster Cookie");
+        Market.View view = new Market.View(27, "Dev: Booster");
         ItemStack pane = Market.icon(Material.RED_STAINED_GLASS_PANE, " ", NamedTextColor.GRAY, List.of());
         for (int i = 0; i < 27; i++) {
             view.getInventory().setItem(i, pane);
@@ -606,30 +620,37 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         String now = left > 0 ? left(left) : "not active";
         view.set(4, Market.icon(Material.COOKIE, "Your buff: " + now, NamedTextColor.GOLD, List.of(
                 "~Dev account only. Nothing here spends SOMI.")), null);
-        view.set(11, Market.icon(Material.BARRIER, "Clear my Cookie Buff", NamedTextColor.RED, List.of(
+        view.set(11, Market.icon(Material.BARRIER, "Clear my Booster buff", NamedTextColor.RED, List.of(
                 "Sets the time left to 0: commands, menu", "selling, flight and free gas stop now.",
                 "~Profile only, no onchain effect.", "!Click to clear")), c -> {
             profile.cookieUntil = 0L;
             plugin.profiles().save(profile);
             flight(player, profile, false);
-            plugin.getLogger().info("Dev: " + player.getName() + " cleared their Booster Cookie buff.");
-            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Cookie Buff cleared.", NamedTextColor.GRAY)));
+            if (plugin.stats() != null) {
+                plugin.stats().refreshListName(player);
+            }
+            plugin.getLogger().info("Dev: " + player.getName() + " cleared their Booster buff.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Booster buff cleared.", NamedTextColor.GRAY)));
             openDev(player);
         });
-        view.set(13, Market.icon(Material.CLOCK, "Apply a " + days() + "-day Cookie Buff", NamedTextColor.GREEN, List.of(
+        view.set(13, Market.icon(Material.CLOCK, "Apply a " + days() + "-day Booster buff", NamedTextColor.GREEN, List.of(
                 "Sets the time left to exactly " + days() + " days.", "~Profile only, no onchain effect.", "!Click to apply")), c -> {
             profile.cookieUntil = System.currentTimeMillis() + days() * DAY;
             plugin.profiles().save(profile);
             clearOutOfStt(player);
-            plugin.getLogger().info("Dev: " + player.getName() + " applied a " + days() + "-day Booster Cookie buff.");
-            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Cookie Buff set to " + days() + " days.", NamedTextColor.GRAY)));
+            flight(player, profile, true);
+            if (plugin.stats() != null) {
+                plugin.stats().refreshListName(player);
+            }
+            plugin.getLogger().info("Dev: " + player.getName() + " applied a " + days() + "-day Booster buff.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Booster buff set to " + days() + " days.", NamedTextColor.GRAY)));
             openDev(player);
         });
-        view.set(15, Market.icon(Material.CHEST, "Give me a Booster Cookie item", NamedTextColor.GOLD, List.of(
+        view.set(15, Market.icon(Material.CHEST, "Give me a Booster item", NamedTextColor.GOLD, List.of(
                 "One cookie item, no SOMI spent.", "~It lands in your bag like any item,", "~so the next bag write records it.", "!Click to take one")), c -> {
             plugin.market().giveOrStash(player.getUniqueId(), KEY, 1, true);
-            plugin.getLogger().info("Dev: " + player.getName() + " took a Booster Cookie item.");
-            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Booster Cookie added to your inventory.", NamedTextColor.GRAY)));
+            plugin.getLogger().info("Dev: " + player.getName() + " took a Booster item.");
+            player.sendMessage(Component.text("[DEV] ", NamedTextColor.RED).append(Component.text("Booster item added to your inventory (needs a bag write).", NamedTextColor.GRAY)));
         });
         view.set(22, Market.icon(Material.ARROW, "Close", NamedTextColor.GRAY, List.of()), c -> player.closeInventory());
         player.openInventory(view.getInventory());
