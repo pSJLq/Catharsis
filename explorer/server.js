@@ -671,7 +671,7 @@ const CONTRACTS = [
   { name: 'Gear', address: GEAR_PRETTY, role: 'Tool traits' },
   { name: 'Word', address: WORD, role: 'Spell words' },
   { name: 'AOTV', address: AOTV, role: 'Aspect of the Void' },
-  { name: 'Skills', address: chain.skills ? ethers.getAddress(chain.skills) : null, role: 'Skill XP and collections (caps per write and per hour)' },
+  { name: 'Profile', address: chain.skills ? ethers.getAddress(chain.skills) : null, role: 'Progress per island deed: shared collections, skills, SkyBlock Level' },
   { name: 'Realm', address: chain.realm ? ethers.getAddress(chain.realm) : null, role: 'Bazaar, auctions, arena, Relic Pool' },
   { name: 'Bin', address: chain.bin ? ethers.getAddress(chain.bin) : null, role: 'Buy-It-Now listings' },
   { name: 'Keys', address: chain.keys ? ethers.getAddress(chain.keys) : null, role: 'Exported wallet keys (every write server-signed)' },

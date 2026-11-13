@@ -37,7 +37,7 @@ Deployer (public EOA, not a key): [`0x9EbD5ED2BD30F943fF9ffEE6443a4963aaD966d6`]
 | SkyKeys | [`0x75B33d1FFd2cb793Cca8280B8E80762339927B3b`](https://explorer.testnet.somnia.network/address/0x75B33d1FFd2cb793Cca8280B8E80762339927B3b) | One-way flag for wallets whose key was exported (mode B). Deployed 2026-11-11. |
 | SkyIsland3 | [`0xeeEA12518a25852242E7841cf8436141e57475Cf`](https://explorer.testnet.somnia.network/address/0xeeEA12518a25852242E7841cf8436141e57475Cf) | Island deeds and co-op (attested): invite, accept, leave, kick, at most 5 players per island. Imported from SkyIsland2 on 2026-11-12. |
 | SkyWord2 | [`0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405`](https://explorer.testnet.somnia.network/address/0x4611a06Fc96f7dF31D5363c1Cb6D300FA691D405) | Inventory (packed bag words). Slot 9 of the hotbar can never hold an item. |
-| SkySkills3 | [`0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d`](https://explorer.testnet.somnia.network/address/0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d) | Skills and collections (current). Caps of 1,000,000 per entry and 20,000,000 per hour. |
+| SkyProfile | [`0x49C6D4e3dbcC751CA37672CF9F443cAB02278ee4`](https://explorer.testnet.somnia.network/address/0x49C6D4e3dbcC751CA37672CF9F443cAB02278ee4) | Progress per island deed (SkyIsland4), like a SkyBlock profile: one shared counter per collection per island, each member's skill XP and task XP on that island, and the SkyBlock XP / Level computed onchain (`sbXpOf`, `levelOf`). Only island members write, from their own wallet. Caps of 1,000,000 per entry and 20,000,000 per hour. Deployed 2026-11-13, nothing imported. |
 | SkyHold2 | [`0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f`](https://explorer.testnet.somnia.network/address/0x5F802b43A38f5460BAB78f4793601c36eEF7ba7f) | Held items / equipment slots |
 | SkyGear2 | [`0x67e01A054Dbe23d45695F737a77768d4a842c4b0`](https://explorer.testnet.somnia.network/address/0x67e01A054Dbe23d45695F737a77768d4a842c4b0) | Unique gear tokens |
 | AOTV2 | [`0x248a3A61F1227774D4fCeA15e1725CA95dAbF632`](https://explorer.testnet.somnia.network/address/0x248a3A61F1227774D4fCeA15e1725CA95dAbF632) | Aspect of the Void token |
@@ -49,6 +49,8 @@ The plugin default config ships public RPC URLs and these addresses. Operator-on
 Previous contracts (SkyIsland `0xeB97…6bA0`, SkyWord `0x699C…684c`, SkySkills2 `0x287b…BcEf`, SkySkills v1 `0x81f5…854a`, SkyHold `0x26cf…03F3`, SkyGear `0x4f63…E1d8`, AOTV `0x378D…9c24`, SkyRealm `0xEE46…C59d`, SkyBin `0xCfA5…d638`) were migrated on 2026-11-11 and closed; they stay onchain for history.
 
 SkyIsland2 [`0xaCced5efB1762DfAF2587723c9dC07256fa4eb60`](https://explorer.testnet.somnia.network/address/0xaCced5efB1762DfAF2587723c9dC07256fa4eb60) is old and no longer written: its 3 deeds and the island counters were imported into SkyIsland3 on 2026-11-12 and its import was closed.
+
+SkySkills3 [`0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d`](https://explorer.testnet.somnia.network/address/0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d) (skills and collections per wallet) is old and no longer written: SkyProfile replaced it on 2026-11-13 and progress started from zero (no import).
 
 ## Wallet keys: two modes
 

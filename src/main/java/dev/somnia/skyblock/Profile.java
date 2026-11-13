@@ -78,8 +78,17 @@ final class Profile {
     long[] skillTxXp = new long[SkillChain.SKILLS];
     long[] skillTxCol = new long[SkillChain.COLLECTIONS];
     String lastSkillTx;
-    /** Profile delete on SkySkills2: resetProfile() still has to land from this player's purse. */
+    /** Profile delete: SkyProfile.resetProfile / resetSelf still has to land from this player's purse. */
     boolean skillsResetPending;
+    /** The queued reset wipes the whole island profile (solo deed holder), not only this member's record. */
+    boolean skillsResetWhole;
+    /** SkyProfile: island deed id the cached skills and task XP belong to (0 = not bound yet). */
+    long chainIsland;
+    /** SkyProfile: task SkyBlock XP (quest steps, areas) confirmed onchain on chainIsland. */
+    long chainTask;
+    /** Inflight batch: task XP and the island it was sent to. */
+    long skillTxTask;
+    long skillTxIsland;
     int minionsHeld;
     /** Tiers of minions in storage (picked-up minions keep their tier); entries missing here are tier I. */
     final java.util.List<Integer> heldTiers = new java.util.ArrayList<>();

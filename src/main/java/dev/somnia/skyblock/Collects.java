@@ -89,8 +89,8 @@ final class Collects {
     }
 
     /**
-     * This player's own collection count (what SkySkills holds for their address). Island cobble/oak/wheat come
-     * from the chain-backed counters, everything else from the profile map.
+     * This player's own contribution on their current profile (kept by the server; the co-op total is onchain in
+     * SkyProfile). Shown per member in the collection menu and used for the event score.
      */
     static long amount(Profile p, Entry e) {
         long extra = p.collections.getOrDefault(e.key(), 0L);
@@ -103,10 +103,18 @@ final class Collects {
     }
 
     /**
-     * The collection as the player sees it: in a co-op every member's own count added up (Hypixel: collections are
-     * shared, each member's contribution is shown). Solo it is the player's own count.
+     * The collection as the player sees it: the island's shared counter in SkyProfile (one per item per island deed,
+     * the whole co-op) plus what members still have queued. Before the island is read it falls back to every member's
+     * own count added up.
      */
     static long shared(Profile p, Entry e) {
+        SkillChain chain = SkillChain.get();
+        if (chain != null) {
+            Long island = chain.sharedCollection(p, ENTRIES.indexOf(e));
+            if (island != null) {
+                return island; // SkyProfile: one onchain counter per island deed, plus every member's queue
+            }
+        }
         List<Profile> group = Coops.group(p);
         if (group.size() < 2) {
             return amount(p, e);

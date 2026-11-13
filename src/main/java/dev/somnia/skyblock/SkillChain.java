@@ -10,39 +10,59 @@ import org.bukkit.event.Listener;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Skill XP and collections live in SkySkills (chain = source of truth, YAML = cache).
- * Every XP gain and collection increment is queued in Profile.pendingXp / pendingCol and sent
- * in the 4 s batch, signed by the player's own purse. Pending is only cleared after receipt status 1,
- * so a failed or reverted batch is retried and no XP is lost. On login the profile is set to
- * chain value + pending; the first login also migrates the old YAML values as one-time deltas.
- * Skill ids: 0 mining, 1 foraging, 2 farming, 3 combat, 4 fishing, 5 enchanting, 6 alchemy, 7 taming, 8 carpentry.
- * Collection id = index in Collects.ENTRIES (append only, never reorder).
+ * Skill XP, collections and SkyBlock XP live in SkyProfile, keyed by the island deed (SkyIsland4): a profile is the
+ * island, like a SkyBlock profile. Chain = source of truth, YAML = cache.
+ * <ul>
+ *   <li>Collections are one shared counter per item per island (the co-op total).</li>
+ *   <li>Skill XP and task SkyBlock XP (quest steps, areas) are per member on that island.</li>
+ *   <li>SkyBlock XP / Level is computed by the contract from that data (sbXpOf / levelOf); the game uses the same
+ *       formula on the chain values plus the not yet confirmed queue.</li>
+ * </ul>
+ * Every gain is queued in Profile.pendingXp / pendingCol and sent in the 4 s batch, signed by the player's own purse
+ * (a Booster sponsors gas as before). Pending is only cleared after receipt status 1. A player who leaves a co-op keeps
+ * their record on the old island and starts from zero on the next one. Skill ids: 0 mining, 1 foraging, 2 farming,
+ * 3 combat, 4 fishing, 5 enchanting, 6 alchemy, 7 taming, 8 carpentry. Collection id = index in Collects.ENTRIES.
  */
 final class SkillChain implements Listener {
     static final int SKILLS = 9;
     static final int COLLECTIONS = 64;
     static final int MAX_ENTRIES = 64;
     static final long MAX_AMOUNT = 1_000_000L;
+    static final long MAX_TASK = 10_000L;
     private static final long INFLIGHT_GIVE_UP_MS = 300_000L;
     private static final long HINT_EVERY_MS = 120_000L;
+
+    /** For the static collection views (Collects.shared). */
+    private static volatile SkillChain instance;
 
     private final SomniaSkyblockPlugin plugin;
     private final Set<UUID> busy = ConcurrentHashMap.newKeySet();
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> retryAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> hinted = new ConcurrentHashMap<>();
+    /** Island deed id -> shared collection counters as last read or confirmed onchain. */
+    private final Map<Long, long[]> islandCols = new ConcurrentHashMap<>();
 
     SkillChain(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
+        instance = this;
         if (enabled()) {
-            plugin.getLogger().info("Skills contract " + contract() + " (chain is the source of truth for skill XP and collections).");
+            plugin.getLogger().info("Profile contract " + contract() + " (SkyProfile: skills, shared collections and SkyBlock Level per island deed).");
+            // One pass over every saved profile: anything cached from the old wallet-based contract is dropped, so the
+            // game starts from zero together with the new contract (no import).
+            Bukkit.getScheduler().runTask(plugin, this::freshStartAll);
         }
+    }
+
+    static SkillChain get() {
+        return instance;
     }
 
     String contract() {
@@ -50,36 +70,84 @@ final class SkillChain implements Listener {
         return value == null ? "" : value.trim();
     }
 
-    /** 1 = SkySkills (add-only), 2 = SkySkills2 (profile epochs, resetProfile). */
+    /** 4 = SkyProfile (per island deed). Older values belong to the retired wallet-based SkySkills contracts. */
     int version() {
-        return plugin.getConfig().getInt("chain.skills-version", 1);
+        return plugin.getConfig().getInt("chain.skills-version", 4);
     }
 
     boolean canReset() {
-        return enabled() && version() >= 2;
+        return enabled();
     }
 
-    /** Migration key: the wallet plus the contract it was migrated to. A bare wallet means the v1 contract. */
-    private String migrationKey(String wallet) {
-        return wallet.toLowerCase(java.util.Locale.ROOT) + "@" + contract().toLowerCase(java.util.Locale.ROOT);
+    boolean enabled() {
+        return plugin.getConfig().getBoolean("chain.enabled") && !contract().isBlank() && version() >= 4;
     }
 
-    private String storedKey(Profile profile) {
-        String stored = profile.skillsMigrated == null ? "" : profile.skillsMigrated.trim();
-        if (stored.isEmpty() || stored.contains("@")) {
-            return stored.toLowerCase(java.util.Locale.ROOT);
+    /** Cache key: the wallet plus the contract its values belong to. */
+    private String cacheKey(String wallet) {
+        return (wallet == null ? "" : wallet).toLowerCase(java.util.Locale.ROOT) + "@" + contract().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private boolean current(Profile p) {
+        String stored = p.skillsMigrated == null ? "" : p.skillsMigrated.trim().toLowerCase(java.util.Locale.ROOT);
+        return stored.equals(cacheKey(p.wallet));
+    }
+
+    /** True when this profile's cached numbers belong to SkyProfile island `island` (the shared view counts it). */
+    boolean onIsland(Profile p, long island) {
+        return island > 0 && p.chainIsland == island && current(p);
+    }
+
+    // ------------------------------------------------------------------ fresh start (no import)
+
+    private void freshStartAll() {
+        int[] n = {0};
+        plugin.profiles().eachReady(p -> {
+            if (p.wallet == null || p.wallet.isBlank() || current(p)) {
+                return;
+            }
+            synchronized (p) {
+                clearLocal(p);
+                p.skillsMigrated = cacheKey(p.wallet);
+            }
+            plugin.profiles().save(p);
+            n[0]++;
+        });
+        if (n[0] > 0) {
+            plugin.getLogger().info("SkyProfile fresh start: cleared cached skills and collections of " + n[0] + " profile(s); nothing imported from the old contract.");
         }
-        String v1 = plugin.getConfig().getString("chain.skills-contract-v1", "");
-        String legacy = v1 == null || v1.isBlank() ? contract() : v1.trim();
-        return (stored + "@" + legacy).toLowerCase(java.util.Locale.ROOT);
     }
+
+    /** Zeroes the cached skill XP, collections, queues and the inflight batch. Caller holds the profile lock. */
+    private static void clearLocal(Profile p) {
+        for (Skills.Skill skill : Skills.Skill.values()) {
+            Skills.put(p, skill, 0);
+        }
+        java.util.Arrays.fill(p.xpTenths, 0);
+        p.collections.clear();
+        p.discovered.removeIf(k -> k.startsWith("c:"));
+        p.cobble = 0;
+        p.oak = 0;
+        p.wheat = 0;
+        java.util.Arrays.fill(p.pendingXp, 0);
+        java.util.Arrays.fill(p.pendingCol, 0);
+        java.util.Arrays.fill(p.skillsBase, 0);
+        java.util.Arrays.fill(p.colBase, 0);
+        p.skillsResetPending = false;
+        p.skillsResetWhole = false;
+        p.chainIsland = 0;
+        p.chainTask = 0;
+        clearInflight(p);
+    }
+
+    // ------------------------------------------------------------------ resets and island moves
 
     /**
-     * Profile delete: zero this player's skills and collections onchain (SkySkills2.resetProfile from their own purse,
-     * through the same per-purse nonce lane as every other write). Queued XP is dropped; the flag survives restarts.
-     * Caller holds no lock. Returns false on the old add-only contract.
+     * Profile delete / fresh start. {@code whole}: the deed holder (solo) wipes the island profile onchain
+     * (SkyProfile.resetProfile); otherwise only this member's record (resetSelf). Sent from the player's own purse on the
+     * next flush; queued XP is dropped. Returns false when the contract is not configured.
      */
-    boolean requestReset(Profile profile) {
+    boolean requestReset(Profile profile, boolean whole) {
         if (!canReset()) {
             return false;
         }
@@ -92,17 +160,53 @@ final class SkillChain implements Listener {
                 Skills.put(profile, skill, 0);
             }
             profile.collections.clear();
+            profile.chainTask = 0;
             profile.skillsResetPending = true;
+            profile.skillsResetWhole = whole;
         }
+        loaded.remove(profile.uuid);
         plugin.profiles().save(profile);
-        plugin.getLogger().info("Skills reset queued for " + profile.wallet + " (SkySkills2.resetProfile on next flush).");
+        plugin.getLogger().info("Profile reset queued for " + profile.wallet + " (SkyProfile." + (whole ? "resetProfile" : "resetSelf") + " on next flush).");
         return true;
     }
 
-    /** /sbadmin reset-skills <name>: zero one player's skills and collections onchain. */
+    boolean requestReset(Profile profile) {
+        return requestReset(profile, plugin.coops() == null || !plugin.coops().inCoop(profile.uuid));
+    }
+
+    /**
+     * Co-op join or leave: the player moves to another island deed. Nothing is wiped onchain: their record stays on the
+     * old profile, and the next load reads their record on the new island (zero for a new member). Queued XP of the
+     * old island is dropped. Returns false when the contract is not configured.
+     */
+    boolean switchIsland(Profile profile) {
+        if (!enabled()) {
+            return false;
+        }
+        synchronized (profile) {
+            for (Skills.Skill skill : Skills.Skill.values()) {
+                Skills.put(profile, skill, 0);
+            }
+            java.util.Arrays.fill(profile.pendingXp, 0);
+            java.util.Arrays.fill(profile.pendingCol, 0);
+            java.util.Arrays.fill(profile.skillsBase, 0);
+            java.util.Arrays.fill(profile.colBase, 0);
+            profile.collections.clear();
+            profile.skillsResetPending = false;
+            profile.skillsResetWhole = false;
+            profile.chainIsland = 0;
+            profile.chainTask = 0;
+            clearInflight(profile);
+        }
+        loaded.remove(profile.uuid);
+        retryAt.remove(profile.uuid);
+        return true;
+    }
+
+    /** /sbadmin reset-skills <name>: zero one player's profile onchain (whole island when solo, else their own record). */
     void adminReset(String name, java.util.function.Consumer<String> report) {
         if (!canReset()) {
-            report.accept("SkySkills2 is not deployed yet: run /sbadmin deploy-skills2 first.");
+            report.accept("SkyProfile is not configured (chain.skills-contract, skills-version 4).");
             return;
         }
         org.bukkit.OfflinePlayer target = name == null ? null : Bukkit.getOfflinePlayerIfCached(name);
@@ -121,10 +225,6 @@ final class SkillChain implements Listener {
             plugin.stats().markDirty(online);
         }
         report.accept("Reset queued for " + name + " (" + profile.wallet + "). It is sent from their purse " + (online != null ? "now." : "when they next log in."));
-    }
-
-    boolean enabled() {
-        return plugin.getConfig().getBoolean("chain.enabled") && !contract().isBlank();
     }
 
     static int id(Skills.Skill skill) {
@@ -169,69 +269,72 @@ final class SkillChain implements Listener {
         return loaded.contains(id);
     }
 
-    /** Deploys SkySkills from a logged-in player's own purse and switches the server to it (no restart needed). */
+    // ------------------------------------------------------------------ shared collections and SkyBlock XP
+
+    /**
+     * The island's shared collection as the game shows it: the onchain counter plus what every member of that island
+     * still has queued. Null when this profile is not bound to a SkyProfile island yet (the caller falls back).
+     */
+    Long sharedCollection(Profile p, int index) {
+        long island = p.chainIsland;
+        if (!enabled() || island <= 0 || !current(p) || index < 0 || index >= COLLECTIONS) {
+            return null;
+        }
+        long[] chain = islandCols.get(island);
+        if (chain == null) {
+            return null;
+        }
+        long sum = chain[index];
+        List<Profile> group = Coops.group(p);
+        boolean self = false;
+        for (Profile m : group) {
+            if (m.uuid.equals(p.uuid)) {
+                self = true;
+            }
+            if (onIsland(m, island)) {
+                synchronized (m) {
+                    sum += m.pendingCol[index];
+                }
+            }
+        }
+        if (!self) {
+            synchronized (p) {
+                sum += p.pendingCol[index];
+            }
+        }
+        return sum;
+    }
+
+    /** Task SkyBlock XP the game knows locally: quest steps and discovered areas (same rule as Skills.skyblockXp). */
+    static long localTaskXp(Profile p) {
+        long xp = (long) Quests.SKYBLOCK_XP * Quests.xpSteps(p);
+        for (String key : p.discovered) {
+            if (!key.contains(":")) {
+                xp += 5;
+            }
+        }
+        return xp;
+    }
+
+    /** Task XP counted in the SkyBlock Level: the onchain record (plus inflight) or the local value, whichever is higher. */
+    static long taskXp(Profile p) {
+        long local = localTaskXp(p);
+        SkillChain sc = instance;
+        if (sc == null || !sc.enabled() || !sc.current(p)) {
+            return local;
+        }
+        return Math.max(local, p.chainTask);
+    }
+
+    // ------------------------------------------------------------------ deploy (retired)
+
     void deploy(String name, java.util.function.Consumer<String> report) {
         deploy(name, report, false);
     }
 
-    /** v2 = SkySkills2: the old address is kept as chain.skills-contract-v1, every player migrates once from the YAML cache. */
+    /** The wallet-based SkySkills contracts are retired; SkyProfile is deployed with tools/chain/deploy-profile.js. */
     void deploy(String name, java.util.function.Consumer<String> report, boolean v2) {
-        if (!v2 && !contract().isBlank()) {
-            report.accept("SkySkills is already configured at " + contract() + ".");
-            return;
-        }
-        if (v2 && version() >= 2 && !contract().isBlank()) {
-            report.accept("SkySkills2 is already configured at " + contract() + ".");
-            return;
-        }
-        Player player = name == null ? null : Bukkit.getPlayerExact(name);
-        if (player == null) {
-            report.accept("Player " + name + " is not online.");
-            return;
-        }
-        Profile profile = plugin.profiles().get(player.getUniqueId());
-        if (!plugin.wallets().canSign(profile)) {
-            report.accept(name + " has not logged in yet.");
-            return;
-        }
-        String bytecode;
-        try (java.io.InputStream in = plugin.getResource(v2 ? "SkySkills2.bin" : "SkySkills.bin")) {
-            bytecode = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.US_ASCII).trim();
-        } catch (Exception exception) {
-            report.accept((v2 ? "SkySkills2.bin" : "SkySkills.bin") + " is missing from the jar.");
-            return;
-        }
-        String label = v2 ? "SkySkills2" : "SkySkills";
-        report.accept("Deploying " + label + " from " + profile.wallet + "...");
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                String[] done = plugin.wallets().deployFrom(profile, bytecode);
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    if (v2) {
-                        String old = contract();
-                        if (!old.isBlank() && plugin.getConfig().getString("chain.skills-contract-v1", "").isBlank()) {
-                            plugin.getConfig().set("chain.skills-contract-v1", old);
-                        }
-                        plugin.getConfig().set("chain.skills-version", 2);
-                        plugin.getConfig().set("chain.skills-deploy-tx", done[1]);
-                    }
-                    plugin.getConfig().set("chain.skills-contract", done[0]);
-                    plugin.saveConfig();
-                    plugin.getLogger().info(label + " deployed at " + done[0] + " tx " + done[1]);
-                    report.accept(label + " deployed at " + done[0] + " tx " + done[1]);
-                    if (v2) {
-                        // Everyone online re-reads the new contract now (one-time import of the cached values).
-                        loaded.clear();
-                        for (Player online : Bukkit.getOnlinePlayers()) {
-                            load(online);
-                        }
-                    }
-                });
-            } catch (Exception exception) {
-                plugin.getLogger().warning(label + " deploy failed: " + exception.getMessage());
-                Bukkit.getScheduler().runTask(plugin, () -> report.accept(label + " deploy failed: " + exception.getMessage()));
-            }
-        });
+        report.accept("Skills now live in SkyProfile" + (contract().isBlank() ? "" : " at " + contract()) + "; there is nothing to deploy from the game.");
     }
 
     // ------------------------------------------------------------------ login: read the chain
@@ -265,14 +368,27 @@ final class SkillChain implements Listener {
         loaded.remove(id);
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                resolveInflight(profile, true);
                 String from = contract();
-                long[] xp = plugin.wallets().skillsOf(from, wallet);
-                long[] col = plugin.wallets().collectionsOf(from, wallet, Collects.ENTRIES.size());
+                if (!current(profile)) {
+                    synchronized (profile) {
+                        clearLocal(profile);
+                        profile.skillsMigrated = cacheKey(wallet);
+                    }
+                    plugin.getLogger().info("SkyProfile fresh start for " + wallet + " (old cached skills dropped).");
+                } else {
+                    resolveInflight(profile, true);
+                }
+                long island = plugin.wallets().memberIsland(wallet).longValue();
+                if (island <= 0) {
+                    busy.remove(id);
+                    retryAt.put(id, System.currentTimeMillis() + 15_000L);
+                    return;
+                }
+                WalletService.ProfileView view = plugin.wallets().profileOf(from, island, wallet, Collects.ENTRIES.size());
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     try {
                         if (from.equalsIgnoreCase(contract())) {
-                            landed(player, profile, wallet, xp, col);
+                            landed(player, profile, wallet, island, view);
                         }
                     } finally {
                         busy.remove(id);
@@ -281,95 +397,44 @@ final class SkillChain implements Listener {
             } catch (Exception exception) {
                 busy.remove(id);
                 retryAt.put(id, System.currentTimeMillis() + 15_000L);
-                plugin.getLogger().warning("Skills read failed for " + wallet + ": " + exception.getMessage() + " (using the cached YAML for now)");
+                plugin.getLogger().warning("Profile read failed for " + wallet + ": " + exception.getMessage() + " (using the cached YAML for now)");
             }
         });
     }
 
-    private void landed(Player player, Profile profile, String wallet, long[] xp, long[] col) {
-        boolean migrate;
-        long migratedXp = 0;
-        long migratedCol = 0;
+    private void landed(Player player, Profile profile, String wallet, long island, WalletService.ProfileView view) {
+        boolean moved;
         synchronized (profile) {
-            String key = migrationKey(wallet);
-            migrate = !key.equals(storedKey(profile));
-            if (profile.skillsResetPending) {
-                // The reset is not onchain yet: the old epoch still reads its totals, which are already gone.
-                xp = new long[xp.length];
-                col = new long[col.length];
-                migrate = false;
+            moved = profile.chainIsland != 0 && profile.chainIsland != island;
+            if (moved || profile.skillsResetPending) {
+                // Queued gains belong to the island the player left (or to the profile being wiped).
+                java.util.Arrays.fill(profile.pendingXp, 0);
+                java.util.Arrays.fill(profile.pendingCol, 0);
+                clearInflight(profile);
             }
-            if (migrate && !storedKey(profile).isEmpty()) {
-                // New contract: the old fresh-start offsets belonged to the previous contract.
-                java.util.Arrays.fill(profile.skillsBase, 0);
-                java.util.Arrays.fill(profile.colBase, 0);
-            }
+            boolean wiping = profile.skillsResetPending;
             for (Skills.Skill skill : Skills.Skill.values()) {
                 int i = id(skill);
-                long chain = Math.max(0, xp[i] - profile.skillsBase[i]);
-                long local = Skills.xp(profile, skill);
-                long pend = profile.pendingXp[i];
-                if (!migrate && suspicious(chain + pend, local)) {
-                    long over = chain + pend - local;
-                    plugin.getLogger().warning("Chain sanity: " + wallet + " " + skill + " XP reads " + (chain + pend)
-                            + " onchain but the server copy is " + local + "; using the lower value.");
-                    profile.skillsBase[i] += over;
-                    chain -= over;
-                }
-                if (migrate && local > chain + pend) {
-                    migratedXp += local - chain - pend;
-                    pend = local - chain;
-                    profile.pendingXp[i] = pend;
-                }
-                Skills.put(profile, skill, chain + pend);
+                long chain = wiping ? 0 : view.skills()[i];
+                Skills.put(profile, skill, chain + profile.pendingXp[i]);
             }
-            for (int i = 0; i < Collects.ENTRIES.size() && i < COLLECTIONS; i++) {
-                Collects.Entry entry = Collects.ENTRIES.get(i);
-                long chain = Math.max(0, col[i] - profile.colBase[i]);
-                long local = Collects.amount(profile, entry);
-                long pend = profile.pendingCol[i];
-                if (!migrate && suspicious(chain + pend, local)) {
-                    long over = chain + pend - local;
-                    plugin.getLogger().warning("Chain sanity: " + wallet + " collection " + entry.key() + " reads " + (chain + pend)
-                            + " onchain but the server copy is " + local + "; using the lower value.");
-                    profile.colBase[i] += over;
-                    chain -= over;
-                }
-                if (migrate && local > chain + pend) {
-                    migratedCol += local - chain - pend;
-                    pend = local - chain;
-                    profile.pendingCol[i] = pend;
-                }
-                long total = chain + pend;
-                long island = Collects.islandPart(profile, entry);
-                long extra = Math.max(0, total - island);
-                if (extra == 0) {
-                    profile.collections.remove(entry.key());
-                } else {
-                    profile.collections.put(entry.key(), extra);
-                }
+            profile.chainTask = wiping ? 0 : view.task();
+            profile.chainIsland = island;
+            if (moved) {
+                profile.collections.clear();
             }
-            profile.skillsMigrated = key;
+        }
+        if (!profile.skillsResetPending || !profile.skillsResetWhole) {
+            islandCols.put(island, view.collections());
         }
         loaded.add(profile.uuid);
         plugin.profiles().save(profile);
         if (player.isOnline()) {
             plugin.stats().markDirty(player);
         }
-        plugin.getLogger().info("Skills loaded from chain for " + wallet + (migrate ? " (one-time migration queued: " + migratedXp + " XP, " + migratedCol + " collection)" : ""));
-    }
-
-    /**
-     * Load-time sanity check: the chain may only be ahead of the server's own copy by a few batches
-     * (a crash between a landed batch and the YAML save). More than that is treated as foreign data:
-     * the lower value wins and the gap is kept as an offset so later batches stay consistent.
-     */
-    static boolean suspicious(long chainTotal, long local) {
-        if (chainTotal > 50_000_000_000L) {
-            return true;
-        }
-        long tolerance = Math.max(2_000L, local / 20);
-        return chainTotal > local + tolerance;
+        long shown = Skills.skyblockXp(profile);
+        plugin.getLogger().info("Profile loaded from SkyProfile for " + wallet + ": island #" + island + " era " + view.epoch()
+                + ", contract SkyBlock XP " + view.sbXp() + " (game shows " + shown + " incl. queue)" + (moved ? ", moved from another island (queue dropped)" : ""));
     }
 
     // ------------------------------------------------------------------ 4 s batch
@@ -388,10 +453,6 @@ final class SkillChain implements Listener {
             if (!plugin.wallets().canSign(profile) || profile.wallet == null || profile.wallet.isBlank()) {
                 continue;
             }
-            if (!loaded.contains(id)) {
-                load(player);
-                continue;
-            }
             if (profile.skillTx != null) {
                 busy.add(id);
                 Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -406,48 +467,66 @@ final class SkillChain implements Listener {
                 continue;
             }
             if (profile.skillsResetPending) {
-                if (canReset()) {
-                    sendReset(player, profile);
-                }
+                sendReset(player, profile);
+                continue;
+            }
+            if (!loaded.contains(id)) {
+                load(player);
                 continue;
             }
             send(player, profile);
         }
     }
 
-    /** SkySkills2.resetProfile() from the player's own purse; only after any inflight batch has landed (nonce order). */
+    /** SkyProfile.resetProfile(island) or resetSelf(island) from the player's own purse. */
     private void sendReset(Player player, Profile profile) {
         UUID id = profile.uuid;
         busy.add(id);
         String to = contract();
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
+                long island = plugin.wallets().memberIsland(profile.wallet).longValue();
+                if (island <= 0) {
+                    retryAt.put(id, System.currentTimeMillis() + 15_000L);
+                    return;
+                }
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
                 if ((plugin.cookies() == null || !plugin.cookies().active(profile))
                         && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
                     throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
-                String hash = plugin.wallets().submitTo(profile, to, WalletService.resetProfile(), BigInteger.ZERO);
-                plugin.getLogger().info("Skills reset sent for " + profile.wallet + ": " + hash);
+                boolean whole = profile.skillsResetWhole;
+                String hash;
+                try {
+                    hash = plugin.wallets().submitTo(profile, to, whole ? WalletService.resetIslandProfile(island) : WalletService.resetSelf(island), BigInteger.ZERO);
+                } catch (Exception refused) {
+                    if (!whole || String.valueOf(refused.getMessage()).toLowerCase(java.util.Locale.ROOT).contains("insufficient")) {
+                        throw refused;
+                    }
+                    // Not the solo holder (a member, or members joined since): only this player's own record.
+                    whole = false;
+                    hash = plugin.wallets().submitTo(profile, to, WalletService.resetSelf(island), BigInteger.ZERO);
+                }
+                plugin.getLogger().info("Profile reset sent for " + profile.wallet + " (island #" + island + ", " + (whole ? "whole profile" : "own record") + "): " + hash);
                 TransactionReceipt receipt = plugin.wallets().waitReceipt(hash, 60);
                 if (receipt == null || !receipt.isStatusOK()) {
-                    plugin.getLogger().warning("Skills reset " + hash + (receipt == null ? " has no receipt yet" : " reverted") + ", trying again.");
+                    plugin.getLogger().warning("Profile reset " + hash + (receipt == null ? " has no receipt yet" : " reverted") + ", trying again.");
                     retryAt.put(id, System.currentTimeMillis() + 15_000L);
                     return;
                 }
-                long[] xp = plugin.wallets().skillsOf(to, profile.wallet);
-                long sum = 0;
-                for (long v : xp) {
-                    sum += v;
-                }
-                long total = sum;
+                boolean wipedAll = whole;
                 synchronized (profile) {
                     profile.skillsResetPending = false;
+                    profile.skillsResetWhole = false;
                     profile.lastSkillTx = hash;
-                    profile.skillsMigrated = migrationKey(profile.wallet);
+                    profile.chainIsland = island;
+                    profile.chainTask = 0;
                 }
-                plugin.getLogger().info("Skills reset landed for " + profile.wallet + " tx " + hash + " status 1 gas " + receipt.getGasUsed()
-                        + "; xpOf now sums to " + total + ".");
+                if (wipedAll) {
+                    islandCols.put(island, new long[COLLECTIONS]);
+                }
+                loaded.remove(id);
+                plugin.getLogger().info("Profile reset landed for " + profile.wallet + " tx " + hash + " status 1 gas " + receipt.getGasUsed() + ".");
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     plugin.profiles().save(profile);
                     if (player.isOnline()) {
@@ -461,7 +540,7 @@ final class SkillChain implements Listener {
                 if (broke) {
                     Bukkit.getScheduler().runTask(plugin, () -> hint(player));
                 } else {
-                    plugin.getLogger().warning("Skills reset was not sent for " + profile.wallet + ": " + why);
+                    plugin.getLogger().warning("Profile reset was not sent for " + profile.wallet + ": " + why);
                 }
             } finally {
                 busy.remove(id);
@@ -476,7 +555,10 @@ final class SkillChain implements Listener {
         long[] colAmts = new long[MAX_ENTRIES];
         int ns = 0;
         int nc = 0;
+        long task;
+        long island;
         synchronized (profile) {
+            island = profile.chainIsland;
             for (int i = 0; i < SKILLS && ns + nc < MAX_ENTRIES; i++) {
                 long a = Math.min(profile.pendingXp[i], MAX_AMOUNT);
                 if (a > 0) {
@@ -491,8 +573,13 @@ final class SkillChain implements Listener {
                     colAmts[nc++] = a;
                 }
             }
+            task = Math.max(0, Math.min(MAX_TASK, localTaskXp(profile) - profile.chainTask));
         }
-        if (ns + nc == 0) {
+        if (ns + nc == 0 && task == 0) {
+            return;
+        }
+        if (island <= 0) {
+            loaded.remove(profile.uuid);
             return;
         }
         UUID id = profile.uuid;
@@ -501,14 +588,21 @@ final class SkillChain implements Listener {
         long[] sa = java.util.Arrays.copyOf(amounts, ns);
         int[] c = java.util.Arrays.copyOf(cols, nc);
         long[] ca = java.util.Arrays.copyOf(colAmts, nc);
+        long t = task;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
+                long active = plugin.wallets().memberIsland(profile.wallet).longValue();
+                if (active != island) {
+                    // Joined or left a co-op since the last read: the next load binds the new island.
+                    loaded.remove(id);
+                    return;
+                }
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
                 if ((plugin.cookies() == null || !plugin.cookies().active(profile))
                         && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
                     throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
-                String hash = plugin.wallets().submitTo(profile, contract(), WalletService.applyXp(s, sa, c, ca), BigInteger.ZERO);
+                String hash = plugin.wallets().submitTo(profile, contract(), WalletService.applyXp(island, s, sa, c, ca, t), BigInteger.ZERO);
                 long[] txXp = new long[SKILLS];
                 long[] txCol = new long[COLLECTIONS];
                 for (int i = 0; i < s.length; i++) {
@@ -522,6 +616,8 @@ final class SkillChain implements Listener {
                     profile.skillTxAt = System.currentTimeMillis();
                     profile.skillTxXp = txXp;
                     profile.skillTxCol = txCol;
+                    profile.skillTxTask = t;
+                    profile.skillTxIsland = island;
                 }
                 Bukkit.getScheduler().runTask(plugin, () -> plugin.profiles().save(profile));
                 resolveInflight(profile, false);
@@ -532,7 +628,8 @@ final class SkillChain implements Listener {
                 if (broke) {
                     Bukkit.getScheduler().runTask(plugin, () -> hint(player));
                 } else {
-                    plugin.getLogger().warning("Skills batch was not sent for " + profile.wallet + ": " + why);
+                    plugin.getLogger().warning("Profile batch was not sent for " + profile.wallet + ": " + why);
+                    loaded.remove(id);
                 }
             } finally {
                 busy.remove(id);
@@ -559,25 +656,32 @@ final class SkillChain implements Listener {
                 for (int i = 0; i < SKILLS; i++) {
                     profile.pendingXp[i] = Math.max(0, profile.pendingXp[i] - profile.skillTxXp[i]);
                 }
+                long[] shared = profile.skillTxIsland > 0 ? islandCols.get(profile.skillTxIsland) : null;
                 for (int i = 0; i < COLLECTIONS; i++) {
                     profile.pendingCol[i] = Math.max(0, profile.pendingCol[i] - profile.skillTxCol[i]);
+                    if (shared != null) {
+                        shared[i] += profile.skillTxCol[i];
+                    }
+                }
+                if (profile.skillTxIsland == profile.chainIsland) {
+                    profile.chainTask += profile.skillTxTask;
                 }
                 profile.lastSkillTx = hash;
                 clearInflight(profile);
                 changed = true;
             } else if (receipt != null) {
-                plugin.getLogger().warning("Skills batch reverted " + hash + ", keeping it queued.");
+                plugin.getLogger().warning("Profile batch reverted " + hash + ", keeping it queued.");
                 clearInflight(profile);
                 changed = true;
             } else if (System.currentTimeMillis() - profile.skillTxAt > INFLIGHT_GIVE_UP_MS) {
-                plugin.getLogger().warning("Skills batch " + hash + " has no receipt after 5 min, sending again.");
+                plugin.getLogger().warning("Profile batch " + hash + " has no receipt after 5 min, sending again.");
                 clearInflight(profile);
                 changed = true;
             }
         }
         if (changed) {
             if (receipt != null && receipt.isStatusOK()) {
-                plugin.getLogger().info("Skills batch " + hash + " status 1 gas " + receipt.getGasUsed());
+                plugin.getLogger().info("Profile batch " + hash + " status 1 gas " + receipt.getGasUsed());
             }
             Bukkit.getScheduler().runTask(plugin, () -> plugin.profiles().save(profile));
         }
@@ -588,6 +692,8 @@ final class SkillChain implements Listener {
         profile.skillTxAt = 0;
         profile.skillTxXp = new long[SKILLS];
         profile.skillTxCol = new long[COLLECTIONS];
+        profile.skillTxTask = 0;
+        profile.skillTxIsland = 0;
     }
 
     private void hint(Player player) {

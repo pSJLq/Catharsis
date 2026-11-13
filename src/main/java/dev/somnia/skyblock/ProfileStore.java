@@ -150,6 +150,11 @@ final class ProfileStore {
         readLongs(yaml.getLongList("skills-tx-col"), profile.skillTxCol);
         profile.lastSkillTx = yaml.getString("skills-last-tx");
         profile.skillsResetPending = yaml.getBoolean("skills-reset-pending");
+        profile.skillsResetWhole = yaml.getBoolean("skills-reset-whole");
+        profile.chainIsland = yaml.getLong("profile-island");
+        profile.chainTask = yaml.getLong("profile-task-xp");
+        profile.skillTxTask = yaml.getLong("skills-tx-task");
+        profile.skillTxIsland = yaml.getLong("skills-tx-island");
         profile.minionsHeld = yaml.getInt("minions-held");
         profile.heldTiers.clear();
         profile.heldTiers.addAll(yaml.getIntegerList("minions-held-tiers"));
@@ -227,6 +232,11 @@ final class ProfileStore {
             yaml.set("skills-tx-col", java.util.Arrays.stream(profile.skillTxCol).boxed().toList());
             yaml.set("skills-last-tx", profile.lastSkillTx);
             yaml.set("skills-reset-pending", profile.skillsResetPending);
+            yaml.set("skills-reset-whole", profile.skillsResetWhole);
+            yaml.set("profile-island", profile.chainIsland);
+            yaml.set("profile-task-xp", profile.chainTask);
+            yaml.set("skills-tx-task", profile.skillTxTask);
+            yaml.set("skills-tx-island", profile.skillTxIsland);
         }
         yaml.set("minions-held", profile.minionsHeld);
         yaml.set("minions-held-tiers", new java.util.ArrayList<>(profile.heldTiers));

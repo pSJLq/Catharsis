@@ -544,12 +544,12 @@ final class Minions implements Listener, CommandExecutor {
         dirty = true;
         Profile profile = plugin.profiles().get(m.owner);
         Collects.Entry cobble = Collects.of(Material.COBBLESTONE);
-        long before = Collects.amount(profile, cobble);
+        long before = Collects.shared(profile, cobble);
         profile.collections.merge("cobblestone", add, Long::sum);
         plugin.skillChain().queueCollection(profile, cobble, add);
         Player online = plugin.getServer().getPlayer(m.owner);
         if (online != null) {
-            Collects.announce(online, profile, cobble, before, Collects.amount(profile, cobble));
+            Collects.announce(online, profile, cobble, before, Collects.shared(profile, cobble));
         }
     }
 

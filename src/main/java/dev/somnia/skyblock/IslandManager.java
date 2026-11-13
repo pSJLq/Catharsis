@@ -120,7 +120,7 @@ final class IslandManager {
     private void freshStart(Profile p) {
         // A co-op member's island is shared: their own data is wiped, the island stays for the others.
         boolean shared = plugin.coops() != null && plugin.coops().inCoop(p.uuid);
-        int how = wipe(p, true);
+        int how = wipe(p, true, shared ? 1 : 2);
         if (how < 0) {
             return;
         }
@@ -134,13 +134,13 @@ final class IslandManager {
         }
         EventTally.profileReset(p);
         plugin.getLogger().info("Fresh start for " + p.uuid + " (" + p.wallet + "): island " + p.islandX + "," + p.islandZ
-                + (shared ? " kept (co-op island)" : " rebuilt from the starter") + ", " + (onchainReset ? "skills reset onchain (SkySkills2.resetProfile) at next login" : "skills base " + java.util.Arrays.toString(p.skillsBase))
+                + (shared ? " kept (co-op island)" : " rebuilt from the starter") + ", " + (onchainReset ? "profile reset onchain (SkyProfile) at next login" : "skills base " + java.util.Arrays.toString(p.skillsBase))
                 + ", bag clears onchain at next login.");
     }
 
     /** Joins a co-op: the player's own data is wiped (as a reset) and they move onto the owner's island. */
     void joinCoop(Profile p, Profile owner) {
-        wipe(p, false);
+        wipe(p, false, 0);
         copyIsland(owner, p);
         p.bagCleared = false;
         p.seenGuide = false;
@@ -150,7 +150,7 @@ final class IslandManager {
 
     /** Leaves (or is kicked from) a co-op: wiped again and given a fresh starter island on their old slot. */
     void leaveCoop(Profile p, int[] home) {
-        wipe(p, false);
+        wipe(p, false, 0);
         Profile host = Coops.host(p);
         boolean useHome = home != null && !(host != p && host.islandX == home[0] && host.islandZ == home[1]);
         if (useHome) {
@@ -179,14 +179,18 @@ final class IslandManager {
         to.islandReady = true;
     }
 
-    /** Wipes the player's own progress (not the island). -1 = skipped, 0 = offset reset, 1 = onchain reset queued. */
-    private int wipe(Profile p, boolean checkMinions) {
+    /**
+     * Wipes the player's own progress (not the island). -1 = skipped, 0 = offset reset, 1 = onchain reset queued.
+     * {@code chain}: 0 = co-op join/leave (SkyProfile: the record stays on the old island, the new island is read fresh),
+     * 1 = reset only this member's record onchain, 2 = wipe the whole island profile onchain (solo holder).
+     */
+    private int wipe(Profile p, boolean checkMinions, int chain) {
         if (checkMinions && plugin.minions().countOn(p) > 0) {
             plugin.getLogger().severe("Fresh start skipped for " + p.uuid + ": minions are placed on the island.");
             return -1;
         }
-        // SkySkills2: a real onchain reset (resetProfile from the player's purse). Old add-only SkySkills: offset fallback.
-        boolean onchainReset = plugin.skillChain() != null && plugin.skillChain().requestReset(p);
+        boolean onchainReset = plugin.skillChain() != null
+                && (chain == 0 ? plugin.skillChain().switchIsland(p) : plugin.skillChain().requestReset(p, chain == 2));
         synchronized (p) {
             if (!onchainReset) {
                 for (Skills.Skill skill : Skills.Skill.values()) {

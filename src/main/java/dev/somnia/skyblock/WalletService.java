@@ -1398,6 +1398,77 @@ final class WalletService {
         return new Function("resetProfile", List.of(), Collections.emptyList());
     }
 
+    /** SkyProfile.resetProfile(island): the solo deed holder wipes the whole island profile. */
+    static Function resetIslandProfile(long island) {
+        return new Function("resetProfile", List.of(new Uint256(BigInteger.valueOf(island))), Collections.emptyList());
+    }
+
+    /** SkyProfile.resetSelf(island): wipes only the caller's own record on their island. */
+    static Function resetSelf(long island) {
+        return new Function("resetSelf", List.of(new Uint256(BigInteger.valueOf(island))), Collections.emptyList());
+    }
+
+    /** SkyProfile.applyXp(island, skills, amounts, collectionIds, collectionAmounts, taskXp). */
+    static Function applyXp(long island, int[] skills, long[] amounts, int[] cols, long[] colAmts, long task) {
+        List<Uint8> s = new ArrayList<>();
+        List<Uint32> a = new ArrayList<>();
+        List<Uint16> c = new ArrayList<>();
+        List<Uint32> ca = new ArrayList<>();
+        for (int i = 0; i < skills.length; i++) {
+            s.add(new Uint8(BigInteger.valueOf(skills[i])));
+            a.add(new Uint32(BigInteger.valueOf(amounts[i])));
+        }
+        for (int i = 0; i < cols.length; i++) {
+            c.add(new Uint16(BigInteger.valueOf(cols[i])));
+            ca.add(new Uint32(BigInteger.valueOf(colAmts[i])));
+        }
+        return new Function("applyXp", List.of(
+                new Uint256(BigInteger.valueOf(island)),
+                new DynamicArray<>(Uint8.class, s),
+                new DynamicArray<>(Uint32.class, a),
+                new DynamicArray<>(Uint16.class, c),
+                new DynamicArray<>(Uint32.class, ca),
+                new Uint32(BigInteger.valueOf(task))
+        ), Collections.emptyList());
+    }
+
+    /** One SkyProfile read: era, the member's skills and task XP, the island's shared collections, contract SkyBlock XP. */
+    record ProfileView(long epoch, long[] skills, long task, long[] collections, long sbXp) {
+    }
+
+    /** SkyProfile.profileOf(island, member, n). Collections padded to SkillChain.COLLECTIONS. */
+    ProfileView profileOf(String contract, long island, String member, int n) throws IOException {
+        Function function = new Function("profileOf", List.of(new Uint256(BigInteger.valueOf(island)), new Address(member),
+                new Uint16(BigInteger.valueOf(n))), Collections.emptyList());
+        byte[] data = Numeric.hexStringToByteArray(call(member, contract, function));
+        int head = 13 * 32;
+        if (data.length < head + 32) {
+            throw new IOException("Shannon returned a short profile view.");
+        }
+        java.util.function.IntFunction<BigInteger> word = i -> new BigInteger(1, Arrays.copyOfRange(data, i * 32, i * 32 + 32));
+        long epoch = word.apply(0).longValue();
+        long[] skills = new long[SkillChain.SKILLS];
+        for (int i = 0; i < SkillChain.SKILLS; i++) {
+            skills[i] = word.apply(1 + i).longValue();
+        }
+        long task = word.apply(10).longValue();
+        int offset = word.apply(11).intValue();
+        long sbXp = word.apply(12).longValue();
+        if (offset + 32 > data.length) {
+            throw new IOException("Shannon returned a broken profile view.");
+        }
+        int length = new BigInteger(1, Arrays.copyOfRange(data, offset, offset + 32)).intValue();
+        if (length != n || offset + 32 + 32 * n > data.length) {
+            throw new IOException("Shannon returned a broken profile view.");
+        }
+        long[] cols = new long[SkillChain.COLLECTIONS];
+        for (int i = 0; i < n && i < cols.length; i++) {
+            int start = offset + 32 + i * 32;
+            cols[i] = new BigInteger(1, Arrays.copyOfRange(data, start, start + 32)).longValue();
+        }
+        return new ProfileView(epoch, skills, task, cols, sbXp);
+    }
+
     static Function applyXp(int[] skills, long[] amounts, int[] cols, long[] colAmts) {
         List<Uint8> s = new ArrayList<>();
         List<Uint32> a = new ArrayList<>();

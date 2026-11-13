@@ -37,6 +37,8 @@ final class Attestor {
     private static final Set<String> FREE = Set.of(
             selector("cast(uint8)"),
             selector("resetProfile()"),
+            selector("resetProfile(uint256)"),
+            selector("resetSelf(uint256)"),
             selector("cancelBuyOrder(uint256)"),
             selector("settle(uint256)"),
             selector("cashIn(uint256)"),
@@ -51,6 +53,7 @@ final class Attestor {
     private static final Set<String> GUARDED = Set.of(
             selector("write(uint8[],uint256[])"),
             selector("applyXp(uint8[],uint32[],uint16[],uint32[])"),
+            selector("applyXp(uint256,uint8[],uint32[],uint16[],uint32[],uint32)"),
             selector("checkpoint(uint256,uint16)"),
             selector("applyBatch(uint32,uint32,uint32)"),
             selector("craft(uint8)"),

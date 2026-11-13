@@ -18,8 +18,10 @@ chain:
   aotv-contract: "0x248a3A61F1227774D4fCeA15e1725CA95dAbF632"
   realm-contract: "0xE124dD8443c1bF2045E1376f5fe3E277Dcd31c8a"
   bin-contract: "0x420Dc7D312719C041bb3fedc6e83Ce8dFd7789A3"
-  skills-contract: "0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d"
-  skills-version: 3  gas-limit: 8000000
+  skills-contract: "0x49C6D4e3dbcC751CA37672CF9F443cAB02278ee4"   # SkyProfile (progress per island deed)
+  old-skills-contract: "0x891361C58ab3b81c2F6469a9F61011ca6fa4E72d"
+  skills-version: 4
+  gas-limit: 8000000
   max-fee-gwei: 20         # cap; the fee itself follows eth_gasPrice (+ a safety margin)
 
 
