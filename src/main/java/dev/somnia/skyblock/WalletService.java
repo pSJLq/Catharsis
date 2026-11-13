@@ -1611,24 +1611,49 @@ final class WalletService {
         }
     }
 
+    /** Player text for a purse that cannot cover a mainnet payment plus a plain transfer's network fee. */
+    static String shortSomi(BigInteger balance, BigInteger least) {
+        BigDecimal have = Convert.fromWei(new BigDecimal(balance == null ? BigInteger.ZERO : balance), Convert.Unit.ETHER)
+                .setScale(4, java.math.RoundingMode.DOWN).stripTrailingZeros();
+        BigDecimal need = Convert.fromWei(new BigDecimal(least), Convert.Unit.ETHER)
+                .setScale(4, java.math.RoundingMode.CEILING).stripTrailingZeros();
+        return "not enough SOMI. Your purse on Somnia mainnet has " + have.toPlainString() + " SOMI and this needs about "
+                + need.toPlainString() + " SOMI (price plus network fee). /cookie address shows where to send SOMI.";
+    }
+
     /** A plain SOMI transfer on Somnia mainnet signed by the player's own purse key (same address as on Shannon). */
     String mainnetPay(Profile profile, Web3j main, long mainChainId, String to, BigInteger value) throws Exception {
+        return mainnetPay(profile, main, mainChainId, to, value, null);
+    }
+
+    /**
+     * Same as above; {@code beforeSend} gets the transaction hash (computed from the signed bytes) before it is
+     * broadcast, so a crash or restart between sending and recording cannot lose a paid purchase.
+     */
+    String mainnetPay(Profile profile, Web3j main, long mainChainId, String to, BigInteger value,
+                      java.util.function.Consumer<String> beforeSend) throws Exception {
         Credentials credentials = credentials(profile);
         String from = credentials.getAddress();
-        EthEstimateGas estimated = main.ethEstimateGas(new Transaction(from, null, null, null, to, value, null)).send();
-        if (estimated.hasError() || estimated.getAmountUsed() == null || estimated.getAmountUsed().signum() <= 0) {
-            String why = estimated.hasError() ? trim(estimated.getError().getMessage()) : "no estimate";
-            if (why.toLowerCase(Locale.ROOT).contains("insufficient")) {
-                why = "not enough SOMI in your purse on Somnia mainnet";
-            }
-            throw new IllegalStateException(why + ".");
-        }
-        BigInteger gas = estimated.getAmountUsed().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
+        // Balance first: with too little SOMI the node's estimate only answers "execution reverted".
         BigInteger price = main.ethGasPrice().send().getGasPrice();
         if (price == null || price.compareTo(FEE_FLOOR) < 0) {
             price = FEE_FLOOR;
         }
         BigInteger balance = main.ethGetBalance(from, DefaultBlockParameterName.LATEST).send().getBalance();
+        BigInteger least = value.add(BigInteger.valueOf(25_200L).multiply(price)); // 21000 gas * 1.2
+        if (balance == null || balance.compareTo(least) < 0) {
+            throw new IllegalStateException(shortSomi(balance, least));
+        }
+        EthEstimateGas estimated = main.ethEstimateGas(new Transaction(from, null, null, null, to, value, null)).send();
+        if (estimated.hasError() || estimated.getAmountUsed() == null || estimated.getAmountUsed().signum() <= 0) {
+            String why = estimated.hasError() ? trim(estimated.getError().getMessage()) : "no estimate";
+            String low = why.toLowerCase(Locale.ROOT);
+            if (low.contains("insufficient") || low.contains("reverted")) {
+                throw new IllegalStateException(shortSomi(balance, least));
+            }
+            throw new IllegalStateException(why + ".");
+        }
+        BigInteger gas = estimated.getAmountUsed().multiply(BigInteger.valueOf(12)).divide(BigInteger.TEN);
         BigInteger need = value.add(gas.multiply(price));
         if (balance.compareTo(need) < 0) {
             throw new IllegalStateException("your mainnet purse has " + format(balance) + " SOMI, this needs " + format(value)
@@ -1637,6 +1662,9 @@ final class WalletService {
         BigInteger nonce = main.ethGetTransactionCount(from, DefaultBlockParameterName.PENDING).send().getTransactionCount();
         RawTransaction transaction = RawTransaction.createEtherTransaction(nonce, price, gas, to, value);
         byte[] signed = TransactionEncoder.signMessage(transaction, mainChainId, credentials);
+        if (beforeSend != null) {
+            beforeSend.accept(Numeric.toHexString(org.web3j.crypto.Hash.sha3(signed)));
+        }
         EthSendTransaction sent = main.ethSendRawTransaction(Numeric.toHexString(signed)).send();
         if (sent.hasError()) {
             throw new IllegalStateException(trim(sent.getError().getMessage()));

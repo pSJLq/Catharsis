@@ -34,6 +34,12 @@ cookie:
   days: 4
   gate-commands: true        # without the buff, /ah /bz /bank (and their menu buttons) are closed; the hub NPCs always work
   sponsor-topup-stt: 0.02    # buff holders: the admin wallet tops the purse up by at least this when gas is short
+event:
+  # Launch event prizes, claimed in game with /event claim after the website admin finalizes the reviewed winners.
+  # Paid in SOMI on Somnia mainnet (cookie.mainnet-rpc / cookie.mainnet-chain-id) from the prize wallet. Its private
+  # key goes ONLY in secrets.yml as event-prize-key; without it claims answer "Prize payouts open after review".
+  prize-wallet: ""        # optional: the prize wallet's address; a key in secrets.yml that does not match it is refused
+  max-prize-somi: 100     # a winners.json prize above this is ignored
 
 # Login with a limbo (Auth). Purse keys are sealed with the player's password (Argon2id + AES-256-GCM).
 auth:

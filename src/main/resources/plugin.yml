@@ -109,6 +109,10 @@ commands:
     description: Admin - clean stop, save-off/save-on for backups, status
     usage: /sbadmin <stop|save-off|save-on|save|status|unregister <name>|deploy-skills2|reset-skills <name>>
     permission: somnia.admin
+  event:
+    description: Launch event - prizes and your prize claim
+    usage: /event [claim|status]
+    aliases: [events]
   minion:
     description: Place or list your minions
     usage: /minion [place]

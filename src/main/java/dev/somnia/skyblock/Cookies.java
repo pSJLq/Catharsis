@@ -88,6 +88,8 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
 
     void start() {
         Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 40L, 20L);
+        // Purchases whose receipt came late or that a restart cut off: at startup, then every minute.
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::recover, 200L, 1200L);
     }
 
     // ---------- config ----------
@@ -328,7 +330,11 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         return v.setScale(4, java.math.RoundingMode.DOWN).stripTrailingZeros().toPlainString();
     }
 
-    /** Pays the price from the purse on mainnet; the 4-day buff is applied as soon as the receipt says status 1. No bag item. */
+    /**
+     * Pays the price from the purse on mainnet; the 4-day buff is applied as soon as the receipt says status 1. No bag item.
+     * The hash is written to cookies.yml (state "signed") before the payment is broadcast; if the receipt takes longer
+     * than 60 s or the server restarts, {@link #recover()} finishes the purchase (exactly once per hash).
+     */
     void buy(Player player) {
         Profile profile = plugin.profiles().get(player.getUniqueId());
         UUID id = player.getUniqueId();
@@ -347,11 +353,20 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         player.sendMessage(Component.text("Paying " + priceText() + " SOMI on Somnia mainnet...", NamedTextColor.GRAY));
         BigInteger price = price();
         String to = receiver();
+        String wallet = profile.wallet;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            String hash = null;
+            String[] pending = {null};
             try {
-                hash = plugin.wallets().mainnetPay(profile, main, mainChainId, to, price);
-                record(hash, profile, "sent");
+                String hash = plugin.wallets().mainnetPay(profile, main, mainChainId, to, price, h -> {
+                    pending[0] = h;
+                    watching.add(h.toLowerCase(Locale.ROOT));
+                    record(h, profile.uuid, wallet, "signed", to, price);
+                });
+                if (pending[0] == null) {
+                    pending[0] = hash;
+                    watching.add(hash.toLowerCase(Locale.ROOT));
+                }
+                record(hash, profile.uuid, wallet, "sent", null, null);
                 TransactionReceipt receipt = null;
                 for (int i = 0; i < 240 && receipt == null; i++) {
                     receipt = main.ethGetTransactionReceipt(hash).send().getTransactionReceipt().orElse(null);
@@ -360,48 +375,66 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
                     }
                 }
                 if (receipt == null) {
-                    throw new IllegalStateException("No mainnet receipt yet for " + hash + ". If it lands, ask an admin; nothing was given yet.");
+                    watching.remove(hash.toLowerCase(Locale.ROOT));
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        buying.remove(id);
+                        Player online = Bukkit.getPlayer(id);
+                        if (online != null) {
+                            online.sendMessage(Component.text("Your SOMI payment is sent but not confirmed yet. The Booster is applied automatically as soon as it lands; nothing else to do.", NamedTextColor.YELLOW));
+                        }
+                    });
+                    return;
                 }
-                if (!receipt.isStatusOK()) {
-                    record(hash, profile, "reverted");
-                    throw new IllegalStateException("The SOMI payment reverted (" + hash + "). Only the network fee was spent.");
-                }
-                record(hash, profile, "paid");
-                String done = hash;
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    buying.remove(id);
-                    applyBuff(profile, Bukkit.getPlayer(id));
-                    record(done, profile, "applied");
-                    Player online = Bukkit.getPlayer(id);
-                    if (online != null) {
-                        online.sendMessage(Component.text("You bought a ", NamedTextColor.GREEN)
-                                .append(Component.text("Booster", NamedTextColor.GOLD))
-                                .append(Component.text("! Buff time left: " + left(Math.max(0, profile.cookieUntil - System.currentTimeMillis())), NamedTextColor.GREEN)));
-                        online.sendMessage(Component.text("Mainnet tx: ", NamedTextColor.DARK_GRAY)
-                                .append(Component.text(done, NamedTextColor.GRAY).clickEvent(ClickEvent.openUrl("https://explorer.somnia.network/tx/" + done))
-                                        .hoverEvent(HoverEvent.showText(Component.text("Open in the Somnia explorer", NamedTextColor.YELLOW)))));
-                        online.playSound(online.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.7f, 1.4f);
-                    }
-                });
+                watching.remove(hash.toLowerCase(Locale.ROOT));
+                pending[0] = null; // mined: the outcome below is final (applyPaid is idempotent by hash)
+                finish(hash, receipt, false);
+                Bukkit.getScheduler().runTask(plugin, () -> buying.remove(id));
             } catch (Exception exception) {
                 String why = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-                plugin.getLogger().warning("Booster purchase for " + profile.wallet + " failed: " + why);
+                plugin.getLogger().warning("Booster purchase for " + wallet + " failed: " + why);
+                boolean maybeSent = pending[0] != null;
+                if (maybeSent) {
+                    // Signed (maybe broadcast): the recovery scan decides from the chain, never from this error.
+                    watching.remove(pending[0].toLowerCase(Locale.ROOT));
+                }
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     buying.remove(id);
                     Player online = Bukkit.getPlayer(id);
                     if (online != null) {
                         online.sendMessage(Component.text("Booster not bought: " + why, NamedTextColor.RED));
+                        if (maybeSent) {
+                            online.sendMessage(Component.text("If that payment still lands on mainnet, the Booster is applied automatically.", NamedTextColor.GRAY));
+                        }
                     }
                 });
             }
         });
     }
 
-    private synchronized void record(String hash, Profile profile, String state) {
+    // ---------- purchase records and recovery ----------
+
+    /** Hashes the buy flow is still polling itself; the recovery scan leaves them alone. Lower case. */
+    private final Set<String> watching = ConcurrentHashMap.newKeySet();
+    private volatile boolean recovering;
+
+    private synchronized void record(String hash, UUID player, String wallet, String state, String to, BigInteger value) {
         YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
         String path = "purchases." + hash;
-        yaml.set(path + ".player", profile.uuid.toString());
-        yaml.set(path + ".wallet", profile.wallet);
+        if (!yaml.isSet(path + ".first")) {
+            yaml.set(path + ".first", System.currentTimeMillis());
+        }
+        if (player != null) {
+            yaml.set(path + ".player", player.toString());
+        }
+        if (wallet != null) {
+            yaml.set(path + ".wallet", wallet);
+        }
+        if (to != null) {
+            yaml.set(path + ".to", to);
+        }
+        if (value != null) {
+            yaml.set(path + ".value", value.toString());
+        }
         yaml.set(path + ".state", state);
         yaml.set(path + ".at", System.currentTimeMillis());
         try {
@@ -409,6 +442,211 @@ final class Cookies implements Listener, CommandExecutor, TabCompleter {
         } catch (Exception exception) {
             plugin.getLogger().warning("Could not save cookies.yml: " + exception.getMessage());
         }
+    }
+
+    private synchronized void mark(String hash, String state, String note) {
+        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
+        String path = "purchases." + hash;
+        yaml.set(path + ".state", state);
+        yaml.set(path + ".at", System.currentTimeMillis());
+        if (note != null) {
+            yaml.set(path + ".note", note);
+        }
+        try {
+            yaml.save(file);
+        } catch (Exception exception) {
+            plugin.getLogger().warning("Could not save cookies.yml: " + exception.getMessage());
+        }
+    }
+
+    private synchronized YamlConfiguration records() {
+        return YamlConfiguration.loadConfiguration(file);
+    }
+
+    /**
+     * Every minute (and at startup), async: purchases left in "signed", "sent" or "paid" are checked on mainnet. A
+     * payment counts when its receipt has status 1 and the transaction itself goes from the recorded purse to the
+     * receiver with at least the price, on chain {@code cookie.mainnet-chain-id}. The buff is applied on the main thread
+     * only if the record is not "applied" yet, so a hash never gives two buffs.
+     */
+    void recover() {
+        if (recovering) {
+            return;
+        }
+        recovering = true;
+        try {
+            YamlConfiguration yaml = records();
+            var section = yaml.getConfigurationSection("purchases");
+            if (section == null) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            for (String hash : section.getKeys(false)) {
+                String state = section.getString(hash + ".state", "");
+                if (!state.equals("signed") && !state.equals("sent") && !state.equals("paid")) {
+                    continue;
+                }
+                if (watching.contains(hash.toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+                try {
+                    TransactionReceipt receipt = main.ethGetTransactionReceipt(hash).send().getTransactionReceipt().orElse(null);
+                    if (receipt == null) {
+                        long first = section.getLong(hash + ".first", section.getLong(hash + ".at", now));
+                        var tx = main.ethGetTransactionByHash(hash).send().getTransaction().orElse(null);
+                        if (tx == null && now - first > 6 * 3_600_000L) {
+                            mark(hash, "dropped", "no transaction on mainnet after 6 h");
+                            plugin.getLogger().warning("Booster purchase " + hash + " never reached mainnet; marked dropped.");
+                        }
+                        continue;
+                    }
+                    finish(hash, receipt, true);
+                } catch (Exception exception) {
+                    plugin.getLogger().warning("Booster recovery check for " + hash + " failed: " + exception.getMessage());
+                }
+            }
+        } finally {
+            recovering = false;
+        }
+    }
+
+    /** Verifies a mined payment (any thread) and applies the buff once on the main thread. */
+    private void finish(String hash, TransactionReceipt receipt, boolean recovered) throws Exception {
+        YamlConfiguration yaml = records();
+        String path = "purchases." + hash;
+        String wallet = yaml.getString(path + ".wallet", "");
+        String player = yaml.getString(path + ".player", "");
+        if (!receipt.isStatusOK()) {
+            mark(hash, "reverted", null);
+            if (!recovered) {
+                throw new IllegalStateException("The SOMI payment reverted (" + hash + "). Only the network fee was spent.");
+            }
+            plugin.getLogger().warning("Booster purchase " + hash + " reverted on mainnet.");
+            return;
+        }
+        var tx = main.ethGetTransactionByHash(hash).send().getTransaction().orElse(null);
+        String why = verify(tx, wallet, yaml.getString(path + ".value", null));
+        if (why != null) {
+            mark(hash, "invalid", why);
+            plugin.getLogger().warning("Booster purchase " + hash + " not applied: " + why);
+            if (!recovered) {
+                throw new IllegalStateException("The payment could not be verified (" + why + "). Ask an admin with this hash: " + hash);
+            }
+            return;
+        }
+        UUID id;
+        try {
+            id = UUID.fromString(player);
+        } catch (IllegalArgumentException exception) {
+            mark(hash, "invalid", "no player on the record");
+            return;
+        }
+        if (!"applied".equals(yaml.getString(path + ".state"))) {
+            mark(hash, "paid", null);
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> applyPaid(hash, id, recovered));
+    }
+
+    /** Null when the mined transaction is a valid Booster payment from {@code wallet}. */
+    String verify(org.web3j.protocol.core.methods.response.Transaction tx, String wallet, String recordedValue) {
+        if (tx == null) {
+            return "transaction not found";
+        }
+        if (tx.getChainId() != null && tx.getChainId() != mainChainId) {
+            return "wrong chain " + tx.getChainId();
+        }
+        if (tx.getTo() == null || !tx.getTo().equalsIgnoreCase(receiver())) {
+            return "paid to " + tx.getTo() + ", not the Booster receiver";
+        }
+        if (wallet == null || wallet.isBlank() || tx.getFrom() == null || !tx.getFrom().equalsIgnoreCase(wallet)) {
+            return "sent from " + tx.getFrom() + ", not the player's purse";
+        }
+        BigInteger need = price();
+        try {
+            if (recordedValue != null && !recordedValue.isBlank()) {
+                need = new BigInteger(recordedValue.trim());
+            }
+        } catch (NumberFormatException ignored) {
+            // keep the current price
+        }
+        if (tx.getValue() == null || tx.getValue().compareTo(need) < 0) {
+            return "value " + (tx.getValue() == null ? "none" : fmt(tx.getValue())) + " SOMI is below the price " + fmt(need);
+        }
+        return null;
+    }
+
+    /** Main thread. Applies the buff for {@code hash} unless cookies.yml already says "applied". */
+    private void applyPaid(String hash, UUID id, boolean recovered) {
+        YamlConfiguration yaml = records();
+        String path = "purchases." + hash;
+        if ("applied".equals(yaml.getString(path + ".state"))) {
+            return;
+        }
+        Profile profile = plugin.profiles().get(id);
+        Player online = Bukkit.getPlayer(id);
+        applyBuff(profile, online);
+        mark(hash, "applied", recovered ? "applied by the recovery scan" : null);
+        plugin.getLogger().info("Booster applied for " + profile.wallet + " from mainnet payment " + hash + (recovered ? " (recovered)" : ""));
+        if (online != null) {
+            tellBought(online, profile, hash);
+        } else {
+            synchronized (this) {
+                YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
+                y.set(path + ".notify", true);
+                try {
+                    y.save(file);
+                } catch (Exception exception) {
+                    plugin.getLogger().warning("Could not save cookies.yml: " + exception.getMessage());
+                }
+            }
+        }
+    }
+
+    private void tellBought(Player online, Profile profile, String hash) {
+        online.sendMessage(Component.text("You bought a ", NamedTextColor.GREEN)
+                .append(Component.text("Booster", NamedTextColor.GOLD))
+                .append(Component.text("! Buff time left: " + left(Math.max(0, profile.cookieUntil - System.currentTimeMillis())), NamedTextColor.GREEN)));
+        online.sendMessage(Component.text("Mainnet tx: ", NamedTextColor.DARK_GRAY)
+                .append(Component.text(hash, NamedTextColor.GRAY).clickEvent(ClickEvent.openUrl("https://explorer.somnia.network/tx/" + hash))
+                        .hoverEvent(HoverEvent.showText(Component.text("Open in the Somnia explorer", NamedTextColor.YELLOW)))));
+        online.playSound(online.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.7f, 1.4f);
+    }
+
+    @EventHandler
+    public void onJoinNotice(org.bukkit.event.player.PlayerJoinEvent event) {
+        UUID id = event.getPlayer().getUniqueId();
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Player online = Bukkit.getPlayer(id);
+            if (online == null) {
+                return;
+            }
+            List<String> told = new ArrayList<>();
+            synchronized (this) {
+                YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
+                var section = yaml.getConfigurationSection("purchases");
+                if (section == null) {
+                    return;
+                }
+                for (String hash : section.getKeys(false)) {
+                    if (section.getBoolean(hash + ".notify") && id.toString().equals(section.getString(hash + ".player"))) {
+                        section.set(hash + ".notify", null);
+                        told.add(hash);
+                    }
+                }
+                if (told.isEmpty()) {
+                    return;
+                }
+                try {
+                    yaml.save(file);
+                } catch (Exception exception) {
+                    plugin.getLogger().warning("Could not save cookies.yml: " + exception.getMessage());
+                }
+            }
+            Profile profile = plugin.profiles().get(id);
+            for (String hash : told) {
+                tellBought(online, profile, hash);
+            }
+        }, 100L);
     }
 
     /** Adds days() of buff (stacks; counts down offline). No bag write. */

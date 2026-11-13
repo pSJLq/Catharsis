@@ -35,7 +35,12 @@
     var rows = data.rows || [];
     $("[data-ev-rows]").innerHTML = rows.length ? rows.map(function (r) {
       var badge = r.prize ? ' <span class="ev-badge p' + r.rank + '">' + r.prize + " SOMI</span>" : "";
-      return "<tr" + (r.rank <= 2 ? ' class="top' + r.rank + '"' : "") + "><td>" + r.rank + "</td><td>" + esc(r.name) + badge + "</td><td>+" + num(r.xpGained)
+      if (r.claim) {
+        badge += r.claim.state === "paid"
+          ? ' <a class="ev-claim paid" href="https://explorer.somnia.network/tx/' + esc(r.claim.tx || "") + '" target="_blank" rel="noopener">claimed</a>'
+          : ' <span class="ev-claim">' + (r.claim.state === "pending" ? "payout on its way" : "not claimed yet") + "</span>";
+      }
+      return "<tr" + (r.rank <= 3 ? ' class="top' + r.rank + '"' : "") + "><td>" + r.rank + "</td><td>" + esc(r.name) + badge + "</td><td>+" + num(r.xpGained)
         + "</td><td>+" + num(r.levelGained) + "</td><td>" + num(r.level) + "</td><td>" + num(r.tx) + "</td></tr>";
     }).join("") : '<tr><td colspan="6">' + (data.phase === "idle" || data.phase === "scheduled" ? "The board fills in once the event starts." : "No results yet.") + "</td></tr>";
     var st = data.stats || {};
@@ -44,7 +49,7 @@
     var types = Object.keys(st.txBy || {}).sort(function (a, b) { return st.txBy[b] - st.txBy[a]; });
     $("[data-ev-types]").innerHTML = types.map(function (k) { return "<span>" + esc(names[k] || k) + " <b>" + num(st.txBy[k]) + "</b></span>"; }).join("");
     var note = "";
-    if (data.phase === "ended") note = data.reviewed ? "Final results: the review is done." : "The board is frozen. Results are provisional until the review is done.";
+    if (data.phase === "ended") note = data.finalized ? "Final results. Winners claim their prize in game with /event claim." : data.reviewed ? "Final results: the review is done. Prize claims open soon." : "The board is frozen. Results are provisional until the review is done.";
     else if (data.phase === "running") note = "Provisional standings, refreshed every 30 seconds. Prizes are final after the review at the end.";
     $("[data-ev-note]").textContent = note;
     $("[data-ev-updated]").textContent = data.updated ? "Updated " + when(data.updated) : "";

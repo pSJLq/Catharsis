@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#1a1a1a">
   <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
-  <link rel="stylesheet" href="/css/site.css?v=20261112-event">
+  <link rel="stylesheet" href="/css/site.css?v=20261113-claim">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -54,6 +54,8 @@
             <button class="btn btn-line" type="button" id="ev-stop">Stop event</button>
           </form>
           <p><label><input type="checkbox" id="ev-reviewed"> Review done: show results as final</label></p>
+          <p><button class="btn solid gold bare" type="button" id="ev-finalize">Finalize winners (open prize claims)</button></p>
+          <div class="ev-winners" data-ev-winners></div>
           <p class="ward-note">Empty start = now; empty end = start + 72 hours. Flags are hints for review only; nothing is banned automatically. Disqualified players disappear from the public board.</p>
           <table>
             <thead><tr><th>#</th><th>Player</th><th>XP gained</th><th>Levels</th><th>Tx</th><th>Review</th><th></th></tr></thead>
@@ -68,6 +70,6 @@
   <!--layout:footer-->
   <script src="/js/site.js?v=20261109-hall4"></script>
   <script src="/js/admin.js?v=20261109-hall4"></script>
-  <script src="/js/admin-event.js?v=20261112-xprank"></script>
+  <script src="/js/admin-event.js?v=20261113-claim"></script>
 </body>
 </html>

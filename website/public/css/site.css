@@ -1066,3 +1066,11 @@ html.is-grabbed, html.is-grabbed body { overflow: hidden; }
 .ev-admin td, .ev-admin th { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }
 .ev-flag { color: #ff9c5a; display: block; }
 .ev-dq { color: #ff6b6b; }
+
+/* event: 3rd prize and in-game claim status */
+.ev-prize.third { border-color: #cd7f32; }
+.ev-badge.p3 { border-color: #cd7f32; color: #cd7f32; }
+.ev-table tr.top3 td { background: rgba(205, 127, 50, 0.06); }
+.ev-claim { display: inline-block; margin-left: 6px; font-size: 12px; color: var(--muted); }
+.ev-claim.paid { color: #7bd88f; }
+.ev-winners ul { margin: 6px 0 12px 18px; }

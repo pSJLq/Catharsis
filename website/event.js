@@ -12,8 +12,12 @@ const dataFile = path.join(here, 'data', 'event.json');
 const boardFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'board.json');
 // The plugin reads this to limit self-made profile resets while an event runs (one per 24 h per player).
 const windowFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'window.json');
+// Finalize (admin, after the review) writes the approved winners here; the plugin pays claims (/event claim) from
+// it and reports each claim's state in claims-public.json (state and tx hash only).
+const winnersFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'winners.json');
+const claimsFile = path.join(here, '..', 'server', 'plugins', 'SomniaSkyblock', 'event', 'claims-public.json');
 
-export const PRIZES = [100, 50];
+export const PRIZES = [100, 75, 25];
 const HOUR = 3600 * 1000;
 
 // XP per skill gained inside one rolling hour above which a player is flagged for review (not banned).
@@ -40,7 +44,7 @@ let board = null;
 let boardMtime = 0;
 
 function blank() {
-  return { start: 0, end: 0, stoppedAt: 0, reviewed: false, baseline: null, last: null, flags: {}, dq: {}, reach: {} };
+  return { start: 0, end: 0, stoppedAt: 0, reviewed: false, baseline: null, last: null, flags: {}, dq: {}, reach: {}, finalized: null };
 }
 
 function load() {
@@ -284,24 +288,46 @@ function ranked(rows) {
   return rows.filter((r) => !ineligible(r) && !state.dq[r.uuid]);
 }
 
+// Claim state per winner uuid for the finalized event: 'paid' (with tx), 'pending' or 'open'.
+function claimStates() {
+  const out = {};
+  if (!state.finalized) return out;
+  let pub = null;
+  try { pub = JSON.parse(fs.readFileSync(claimsFile, 'utf8')); } catch (error) { pub = null; }
+  for (const w of state.finalized.winners || []) out[w.uuid] = { state: 'open' };
+  for (const c of Object.values((pub && pub.claims) || {})) {
+    if (c && c.event === state.finalized.event && out[c.uuid]) out[c.uuid] = { state: c.state, tx: c.tx || null };
+  }
+  return out;
+}
+
 function publicView() {
   const now = Date.now();
   const last = state.last || { at: 0, rows: [], stats: { tx: 0, players: 0, txBy: {} } };
-  const rows = ranked(last.rows).slice(0, 100).map((r, i) => ({
-    rank: i + 1,
-    name: r.name,
-    level: r.level,
-    levelGained: r.levelGained,
-    xpGained: r.xpGained,
-    tx: r.tx,
-    prize: PRIZES[i] || 0,
-  }));
+  const claims = claimStates();
+  const prizeOf = {};
+  for (const w of (state.finalized && state.finalized.winners) || []) prizeOf[w.uuid] = w;
+  const rows = ranked(last.rows).slice(0, 100).map((r, i) => {
+    const won = state.finalized ? prizeOf[r.uuid] : null;
+    const row = {
+      rank: i + 1,
+      name: r.name,
+      level: r.level,
+      levelGained: r.levelGained,
+      xpGained: r.xpGained,
+      tx: r.tx,
+      prize: state.finalized ? (won ? Number(won.prize) : 0) : PRIZES[i] || 0,
+    };
+    if (won && claims[r.uuid]) row.claim = claims[r.uuid];
+    return row;
+  });
   return {
     phase: phase(now),
     now,
     start: state.start,
     end: state.start ? endsAt() : 0,
     reviewed: !!state.reviewed,
+    finalized: state.finalized ? state.finalized.at : 0,
     prizes: PRIZES,
     updated: last.at,
     stats: last.stats,
@@ -318,7 +344,9 @@ function adminView() {
   for (const uuid of Object.keys(state.flags)) {
     if (!seen.has(uuid)) rows.push({ uuid, name: nameOf(uuid), rank: 0, levelGained: 0, xpGained: 0, tx: 0, flags: state.flags[uuid], dq: state.dq[uuid] || null });
   }
-  return { ...view, all: rows, limits: LIMITS, rules: RULES, baselineAt: state.baseline ? state.baseline.at : 0 };
+  const claims = claimStates();
+  const winners = ((state.finalized && state.finalized.winners) || []).map((w) => ({ ...w, claim: claims[w.uuid] || { state: 'open' } }));
+  return { ...view, all: rows, limits: LIMITS, rules: RULES, baselineAt: state.baseline ? state.baseline.at : 0, winners };
 }
 
 function nameOf(uuid) {
@@ -400,7 +428,35 @@ export async function handleEvent(req, res, pathname, ward) {
       json(res, 200, adminView());
       return true;
     }
+    if (pathname === '/api/admin/event/finalize' && req.method === 'POST') {
+      if (phase() !== 'ended') {
+        json(res, 409, { error: 'Finalize after the event has ended.' });
+        return true;
+      }
+      if (!state.reviewed) {
+        json(res, 409, { error: 'Tick "Review done" first, then finalize.' });
+        return true;
+      }
+      if (state.finalized && !body.again) {
+        json(res, 409, { error: 'The winners are already final. Confirm to write them again (players who already claimed keep their payout).' });
+        return true;
+      }
+      const top = ranked((state.last && state.last.rows) || []).slice(0, PRIZES.length);
+      const winners = top.map((r, i) => ({ rank: i + 1, uuid: r.uuid, name: r.name, prize: String(PRIZES[i]) })).filter((w) => Number(w.prize) > 0);
+      const event = String(state.start || 0);
+      const file = { event, start: state.start, end: endsAt(), finalizedAt: Date.now(), winners };
+      fs.writeFileSync(winnersFile + '.tmp', JSON.stringify(file, null, 2));
+      fs.renameSync(winnersFile + '.tmp', winnersFile);
+      state.finalized = { at: file.finalizedAt, event, winners };
+      save();
+      json(res, 200, adminView());
+      return true;
+    }
     if (pathname === '/api/admin/event/review' && req.method === 'POST') {
+      if (state.finalized && !body.on) {
+        json(res, 409, { error: 'The winners are already final and claimable in game.' });
+        return true;
+      }
       state.reviewed = !!body.on;
       save();
       json(res, 200, adminView());

@@ -422,6 +422,9 @@ final class SkillChain implements Listener {
             profile.chainIsland = island;
             if (moved) {
                 profile.collections.clear();
+                // Another island's record replaced the old one outside a game reset: a new profile for the website
+                // leaderboard, so the switch itself never counts as event gain.
+                profile.resets++;
             }
         }
         if (!profile.skillsResetPending || !profile.skillsResetWhole) {
@@ -429,6 +432,7 @@ final class SkillChain implements Listener {
         }
         loaded.add(profile.uuid);
         plugin.profiles().save(profile);
+        EventTally.profileLoaded(profile, moved); // a waiting reset/co-op move takes these loaded totals as its new start
         if (player.isOnline()) {
             plugin.stats().markDirty(player);
         }

@@ -61,6 +61,12 @@ final class EventTally implements Listener {
         int evXp;
         /** Profile.resets seen together with sbXp: the website restarts the player's event count when it changes. */
         int epoch;
+        /**
+         * After a reset or co-op move the board keeps showing the last totals and epoch until SkillChain has read the
+         * player's record on the new island; then epoch and totals change together, so a record restored from an old
+         * island (leave and rejoin) becomes the new start, never event gain. Persisted in tally.json.
+         */
+        boolean awaitLoad;
         final long[] xp = new long[Skills.Skill.values().length];
         // rolling windows (memory only)
         final long[] prevXp = new long[Skills.Skill.values().length];
@@ -172,15 +178,39 @@ final class EventTally implements Listener {
         return w[0] > 0 && now >= w[0] && now < w[1] && w[2] == 0;
     }
 
-    /** Right after a full profile reset (main thread): take the new (zeroed) totals and epoch at once. */
+    /**
+     * Right after a full profile reset or co-op join/leave (main thread). With SkyProfile on, the new epoch is published
+     * only once SkillChain has loaded the onchain record on the new island ({@link #profileLoaded}); without it the
+     * new (zeroed) totals and epoch are taken at once.
+     */
     static void profileReset(Profile profile) {
         EventTally t = instance;
         if (t == null || profile == null) {
             return;
         }
         Rec r = t.recs.computeIfAbsent(profile.uuid, u -> new Rec());
-        t.capture(r, profile, false);
+        SkillChain chain = t.plugin.skillChain();
+        if (chain != null && chain.enabled()) {
+            r.awaitLoad = true;
+        } else {
+            t.capture(r, profile, false);
+        }
         r.havePrev = false; // the rolling XP-per-hour window must not see the drop as anything
+    }
+
+    /** SkillChain read the player's onchain profile (main thread): a waiting reset now takes the loaded totals as its start. */
+    static void profileLoaded(Profile profile, boolean moved) {
+        EventTally t = instance;
+        if (t == null || profile == null) {
+            return;
+        }
+        Rec r = moved ? t.recs.computeIfAbsent(profile.uuid, u -> new Rec()) : t.recs.get(profile.uuid);
+        if (r == null || (!r.awaitLoad && !moved)) {
+            return;
+        }
+        r.awaitLoad = false;
+        t.capture(r, profile, false);
+        r.havePrev = false;
     }
 
     // ------------------------------------------------------------------ actions (main thread)
@@ -256,7 +286,9 @@ final class EventTally implements Listener {
             if (r.firstSeen == 0) {
                 r.firstSeen = now;
             }
-            capture(r, plugin.profiles().get(p.getUniqueId()), true);
+            if (!r.awaitLoad) {
+                capture(r, plugin.profiles().get(p.getUniqueId()), true);
+            }
         }
         if (rolled) {
             for (Rec r : recs.values()) {
@@ -331,7 +363,7 @@ final class EventTally implements Listener {
                 String n = Bukkit.getOfflinePlayer(uuid).getName();
                 r.name = n == null ? "" : n;
             }
-            if (Bukkit.getPlayer(uuid) == null) {
+            if (Bukkit.getPlayer(uuid) == null && !r.awaitLoad) {
                 capture(r, plugin.profiles().get(uuid), false);
             }
             added++;
@@ -509,6 +541,19 @@ final class EventTally implements Listener {
             if (r.ipTag != null) {
                 o.addProperty("ipTag", r.ipTag);
             }
+            if (r.awaitLoad) {
+                // the frozen totals the board keeps showing until the onchain read lands (survives a restart)
+                o.addProperty("awaitLoad", true);
+                o.addProperty("epoch", r.epoch);
+                o.addProperty("sbXp", r.sbXp);
+                o.addProperty("evXp", r.evXp);
+                o.addProperty("level", r.level);
+                JsonObject sx = new JsonObject();
+                for (Skills.Skill sk : Skills.Skill.values()) {
+                    sx.addProperty(sk.name().toLowerCase(Locale.ROOT), r.xp[sk.ordinal()]);
+                }
+                o.add("skills", sx);
+            }
             players.add(e.getKey().toString(), o);
         }
         root.add("players", players);
@@ -544,6 +589,20 @@ final class EventTally implements Listener {
                         r.firstSeen = o.has("firstSeen") ? o.get("firstSeen").getAsLong() : 0;
                         r.lastSeen = o.has("lastSeen") ? o.get("lastSeen").getAsLong() : 0;
                         r.ipTag = o.has("ipTag") ? o.get("ipTag").getAsString() : null;
+                        if (o.has("awaitLoad") && o.get("awaitLoad").getAsBoolean()) {
+                            r.awaitLoad = true;
+                            r.epoch = o.has("epoch") ? o.get("epoch").getAsInt() : 0;
+                            r.sbXp = o.has("sbXp") ? o.get("sbXp").getAsInt() : 0;
+                            r.evXp = o.has("evXp") ? o.get("evXp").getAsInt() : 0;
+                            r.level = o.has("level") ? o.get("level").getAsInt() : 0;
+                            if (o.has("skills")) {
+                                JsonObject sx = o.getAsJsonObject("skills");
+                                for (Skills.Skill sk : Skills.Skill.values()) {
+                                    String k = sk.name().toLowerCase(Locale.ROOT);
+                                    r.xp[sk.ordinal()] = sx.has(k) ? sx.get(k).getAsLong() : 0;
+                                }
+                            }
+                        }
                         recs.put(UUID.fromString(e.getKey()), r);
                     }
                 }

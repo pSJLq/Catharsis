@@ -41,6 +41,16 @@
       + " · server data " + (age < 0 ? "missing" : age + " s old")
       + " · tx " + num(d.stats && d.stats.tx) + " · players " + num(d.stats && d.stats.players);
     reviewed.checked = !!d.reviewed;
+    var wEl = box.querySelector("[data-ev-winners]");
+    if (wEl) {
+      var ws = d.winners || [];
+      wEl.innerHTML = ws.length ? "<p>Winners final " + esc(when(d.finalized)) + ":</p><ul>" + ws.map(function (w) {
+        var c = w.claim || {};
+        var st = c.state === "paid" ? 'claimed, tx <a href="https://explorer.somnia.network/tx/' + esc(c.tx || "") + '" target="_blank" rel="noopener">' + esc(String(c.tx || "").slice(0, 12)) + "…</a>"
+          : c.state === "pending" ? "payout pending" : "not claimed yet";
+        return "<li>#" + esc(w.rank) + " " + esc(w.name) + " · " + esc(w.prize) + " SOMI · " + st + "</li>";
+      }).join("") + "</ul>" : (d.phase === "ended" ? "<p>Winners are not final yet. Tick Review done, then Finalize.</p>" : "");
+    }
     var all = d.all || [];
     rowsEl.innerHTML = all.length ? all.map(function (r) {
       var flags = (r.flags || []).map(function (f) {
@@ -75,6 +85,12 @@
   });
   reviewed.addEventListener("change", function () {
     call("/api/admin/event/review", { on: reviewed.checked }).then(paint).catch(say);
+  });
+  document.getElementById("ev-finalize").addEventListener("click", function () {
+    var again = !!(data && data.finalized);
+    if (!confirm((again ? "Write the winners again from the current board?" : "Finalize the winners from the current board?")
+      + "\nThe top " + ((data && data.prizes) || []).length + " can then claim their SOMI in game with /event claim.")) return;
+    call("/api/admin/event/finalize", { again: again }).then(paint).catch(say);
   });
   rowsEl.addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-dq]");

@@ -185,6 +185,14 @@ public final class SomniaSkyblockPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(keyExport, this);
         tally = new EventTally(this);
         getServer().getPluginManager().registerEvents(tally, this);
+        if (getCommand("event") == null) {
+            throw new IllegalStateException("plugin.yml has no command /event");
+        }
+        EventPrizes prizes = new EventPrizes(this);
+        getCommand("event").setExecutor(prizes);
+        getCommand("event").setTabCompleter(prizes);
+        getServer().getPluginManager().registerEvents(prizes, this);
+        prizes.start();
 
         getServer().getScheduler().runTask(this, this::startWorld);
     }
