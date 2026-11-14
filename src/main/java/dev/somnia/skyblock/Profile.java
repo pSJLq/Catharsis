@@ -13,6 +13,8 @@ final class Profile {
     double[] islandNpc;
     String islandPortalDest;
     boolean seenGuide;
+    /** First Banker NPC introduction has been shown. */
+    boolean bankerTalked;
     boolean bagCleared;
     boolean seenHub;
     boolean seenCoal;

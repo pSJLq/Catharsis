@@ -68,6 +68,7 @@ final class ProfileStore {
         profile.islandNpc = doubles(yaml.getDoubleList("island-npc"), 4);
         profile.islandPortalDest = yaml.getString("island-portal-dest");
         profile.seenGuide = yaml.getBoolean("seen-guide");
+        profile.bankerTalked = yaml.getBoolean("banker-talked");
         profile.bagCleared = yaml.getBoolean("bag-cleared");
         profile.seenHub = yaml.getBoolean("seen-hub");
         profile.seenCoal = yaml.getBoolean("seen-coal");
@@ -178,6 +179,7 @@ final class ProfileStore {
         yaml.set("island-npc", profile.islandNpc == null ? null : java.util.Arrays.stream(profile.islandNpc).boxed().toList());
         yaml.set("island-portal-dest", profile.islandPortalDest);
         yaml.set("seen-guide", profile.seenGuide);
+        yaml.set("banker-talked", profile.bankerTalked);
         yaml.set("bag-cleared", profile.bagCleared);
         yaml.set("seen-hub", profile.seenHub);
         yaml.set("seen-coal", profile.seenCoal);

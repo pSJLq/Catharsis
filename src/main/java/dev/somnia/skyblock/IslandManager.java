@@ -215,6 +215,7 @@ final class IslandManager {
             p.kills = 0;
             p.bestWave = 0;
             p.lastCheckpoint = 0;
+            p.bankerTalked = false;
             p.questStep = 0;
             p.questProgress = 0;
             p.questSkip.clear();

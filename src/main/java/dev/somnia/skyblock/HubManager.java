@@ -720,7 +720,8 @@ final class HubManager implements Listener {
         switch (name) {
             case "Bazaar Broker" -> plugin.market().openBazaar(player);
             case "Auctioneer" -> plugin.market().openAuctions(player);
-            case "Banker", "Archivist" -> {
+            case "Banker" -> talkBanker(player);
+            case "Archivist" -> {
                 plugin.quests().hit(player, "talk_bank", 1);
                 plugin.market().openBank(player);
             }
@@ -757,10 +758,8 @@ final class HubManager implements Listener {
         switch (npc.kind()) {
             case "bazaar" -> plugin.market().openBazaar(player);
             case "auction" -> plugin.market().openAuctions(player);
-            case "bank" -> {
-                plugin.quests().hit(player, "talk_bank", 1);
-                plugin.market().openBank(player);
-            }
+            case "bank" -> talkBanker(player);
+            case "fisherman" -> talkFisherman(player, npc);
             case "blacksmith" -> plugin.market().openShop(player);
             case "merchant" -> plugin.market().openMerchant(player, npc.name());
             case "island" -> {
@@ -779,6 +778,51 @@ final class HubManager implements Listener {
                     "The Quest Giver south of the fountain has work for newcomers."), null);
             default -> Chat.npc(plugin, player, npc.name(), List.of(PLACEHOLDER.getOrDefault(npc.id(), "I'll have more to say soon. Come back later!")), null);
         }
+    }
+
+    /** First click: short bank intro and the talk_bank quest hit. Later clicks open the bank menu. */
+    private void talkBanker(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        if (!profile.bankerTalked) {
+            boolean ok = Chat.npc(plugin, player, "Banker", List.of(
+                    "I keep your coins safe while you are out in the world.",
+                    "Onchain work spends a little STT gas from your purse. /deposit shows the address and the faucet.",
+                    "Come back and I'll open your bank any time."),
+                    () -> plugin.quests().hit(player, "talk_bank", 1));
+            if (ok) {
+                profile.bankerTalked = true;
+                plugin.profiles().save(profile);
+            }
+            return;
+        }
+        plugin.quests().hit(player, "talk_bank", 1);
+        plugin.market().openBank(player);
+    }
+
+    /** Old Fisherman: hands over the fishing-quest rod in dialogue. He has no shop. */
+    private void talkFisherman(Player player, Npc npc) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        Quests.Step step = plugin.quests().current(profile);
+        boolean onFish = step != null && step.event().equals("fish");
+        boolean needRod = onFish && !Quests.hasRod(player);
+        List<String> lines;
+        Runnable after = null;
+        if (needRod) {
+            lines = List.of(
+                    "The water here is good, if you have the patience.",
+                    "Take this rod. Cast from the pier, or any still water you find.",
+                    "The Fish Merchant down the dock will buy what you catch.");
+            after = () -> plugin.quests().giveRod(player);
+        } else if (onFish) {
+            lines = List.of(
+                    "Good, you have a rod. Cast from the pier, or any water will do.",
+                    "The Fish Merchant down the dock will buy what you catch.");
+        } else {
+            lines = List.of(
+                    "The best fish come to a still line. Try the pier, or any water you like.",
+                    "The Fish Merchant down the dock will buy what you catch.");
+        }
+        Chat.npc(plugin, player, npc.name(), lines, after);
     }
 
     /** The Quest Giver: intro dialogue line by line; meeting them is an intro objective. */
@@ -864,6 +908,7 @@ final class HubManager implements Listener {
             case "fast_travel" -> "travel";
             case "wizard" -> "arcanist";
             case "guide" -> "guide";
+            case "fisherman" -> "fisherman";
             default -> "placeholder";
         };
     }

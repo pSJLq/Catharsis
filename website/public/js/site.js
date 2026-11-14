@@ -187,6 +187,7 @@
     if (view) {
       view.addEventListener("keydown", onGameKey, true);
       view.addEventListener("keyup", onGameKey, true);
+      view.addEventListener("wheel", onGameWheel, { capture: true, passive: false });
     }
   }
 
@@ -269,7 +270,44 @@
     if (code === "KeyA" || code === "KeyD" || code === "KeyE" || code === "KeyF" || code === "KeyG" || code === "KeyH" || code === "KeyJ" || code === "KeyK" || code === "KeyL" || code === "KeyO" || code === "KeyP" || code === "KeyS" || code === "KeyU") return true;
     if (code === "Tab" || code === "PageUp" || code === "PageDown") return true;
     if (code === "Equal" || code === "Minus" || code === "Digit0" || code === "NumpadAdd" || code === "NumpadSubtract") return true;
-    return key === "+" || key === "-" || key === "_" || key === "=";
+    return key === "+" || key === "-" || key === "_" || key === "=" || key === "0";
+  }
+
+  // F1 (browser help), F12 and Ctrl+Shift+I/J/C (devtools). F3/F11 stay with the game.
+  function devtoolsShortcut(e) {
+    var code = e.code || "";
+    var key = (e.key || "").toLowerCase();
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (code === "F1" || key === "f1" || code === "F12" || key === "f12")) return true;
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (code === "KeyI" || code === "KeyJ" || code === "KeyC" || key === "i" || key === "j" || key === "c")) return true;
+    return false;
+  }
+
+  function onGameWheel(e) {
+    if (!playing()) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+  }
+
+  var lockedKeys = [
+    "KeyW", "KeyR", "KeyT", "KeyN", "KeyQ", "KeyS", "KeyP", "KeyF", "KeyD", "KeyH", "KeyJ", "KeyU", "KeyI", "KeyC",
+    "F1", "F4", "F5", "F11", "F12",
+    "Digit0", "Equal", "Minus", "NumpadAdd", "NumpadSubtract",
+    "ArrowLeft", "ArrowRight", "Backspace", "Tab", "PageUp", "PageDown"
+  ];
+
+  function lockKeys() {
+    try {
+      if (!playing() || !document.fullscreenElement) return;
+      if (navigator.keyboard && navigator.keyboard.lock) {
+        navigator.keyboard.lock(lockedKeys);
+      }
+    } catch (err) {}
+  }
+
+  function unlockKeys() {
+    try {
+      if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
+    } catch (err) {}
   }
 
   var holdClose = false;
@@ -296,7 +334,7 @@
       if (playing() && gameShouldHear(e) && !fromGame(e)) forwardKey(e.type, e);
       return;
     }
-    if (playing() && fatalShortcut(e)) {
+    if (playing() && (fatalShortcut(e) || devtoolsShortcut(e))) {
       e.preventDefault();
       if (gameShouldHear(e) && !fromGame(e)) forwardKey(e.type, e);
       return;
@@ -314,6 +352,7 @@
   }
   window.addEventListener("keydown", onGameKey, true);
   window.addEventListener("keyup", onGameKey, true);
+  window.addEventListener("wheel", onGameWheel, { capture: true, passive: false });
 
   var full = document.querySelector("[data-fullscreen]");
   if (full && stage) {
@@ -321,12 +360,16 @@
       var on = document.fullscreenElement === stage;
       full.textContent = on ? "Exit full screen" : "Full screen";
       full.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) lockKeys();
+      else unlockKeys();
     };
     full.addEventListener("click", function () {
       if (document.fullscreenElement === stage) {
         document.exitFullscreen();
       } else {
-        stage.requestFullscreen();
+        var req = stage.requestFullscreen();
+        if (req && req.then) req.then(lockKeys).catch(function () {});
+        else window.setTimeout(lockKeys, 0);
       }
       window.setTimeout(grab, 0);
     });

@@ -92,35 +92,35 @@ final class Quests implements Listener {
             new Step("talk_quest", 1, 0, null, 0, "Meet the Quest Giver in {plaza}",
                     "Take the island portal or type /hub. The Quest Giver waits south of the fountain."),
             new Step("hub_log", 20, 1000, Skills.Skill.FORAGING, 100, "Chop 20 logs in {forest}",
-                    "Any log counts. Chopped trees grow back a little later. An axe from the Blacksmith or Woodward Fenn is faster."),
+                    "Any log counts. Chopped trees grow back a little later. An axe from the Blacksmith or Woodward Fenn is faster. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("hub_crop", 10, 0, Skills.Skill.FARMING, 10, "Harvest 10 crops in {farm}",
-                    "Only ripe crops count: wheat, carrots, potatoes, melons, pumpkins and sugar cane. They grow back."),
+                    "Only ripe crops count: wheat, carrots, potatoes, melons, pumpkins and sugar cane. They grow back. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("sell", 1, 0, null, 0, "Sell something to a Merchant",
                     "Merchant NPCs buy your logs, crops, ore and drops for coins."),
             new Step("hub_ore", 10, 0, Skills.Skill.MINING, 20, "Mine 10 ore in {mine}",
-                    "Coal needs any pickaxe, iron and lapis a stone pickaxe. Mined ore grows back after a while."),
+                    "Coal needs any pickaxe, iron and lapis a stone pickaxe. Mined ore grows back after a while. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("talk_bank", 1, 0, null, 0, "Visit the Banker",
                     "The Banker shows your purse. Onchain actions pay a little STT gas from it; /deposit shows its address and the faucet."),
             new Step("forge_sword", 1, 0, null, 0, "Forge a sword at the Blacksmith",
                     "Don't fight bare-handed. The Undead Sword costs 150 coins at the Blacksmith in {plaza}."),
             new Step("kill_graveyard", 10, 100, Skills.Skill.COMBAT, 15, "Slay 10 undead in {barrows}",
-                    "The undead roam the dark woods. More of them come out at night. Keep the Rotten Flesh."),
+                    "The undead roam the dark woods. More of them come out at night. Keep the Rotten Flesh. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("forge_armor", 1, 0, null, 0, "Forge a piece of armor",
                     "The Blacksmith makes Graveyard armor from coins and Rotten Flesh. Armor gives Defense."),
             new Step("fish", 1, 1000, Skills.Skill.FISHING, 10, "Catch a fish",
-                    "You got a Fishing Rod. Cast it into any water, {wharf} is the classic spot. Fishing gives Health."),
+                    "Talk to the Old Fisherman at {wharf} for a Fishing Rod, then cast it into any water. Fishing gives Health. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("level", 3, 0, null, 0, "Reach Combat 3",
                     "Every mob you slay gives Combat XP. Farming and Fishing add Health, Mining Defense, Foraging Strength."),
             new Step("kill_ruins", 5, 0, null, 0, "Hunt 5 beasts in {ruins}",
-                    "Wolves and bone archers guard the ruins and hit hard. Come with a sword, armor and some skill levels."),
+                    "Wolves and bone archers guard the ruins and hit hard. Come with a sword, armor and some skill levels. Fast Travel in the SkyBlock Menu can take you there."),
             new Step("bazaar", 1, 0, null, 0, "Make your first Bazaar trade",
                     "/bz: place a sell offer or a buy order, or fill one. Trades are onchain: your purse pays the STT gas, and at 0 STT the trade rolls back. /deposit"),
             new Step("auction", 1, 0, null, 0, "List or bid on an auction",
                     "Hold an item: /ah sell <start stt> [minutes], or bid in /ah. Bids, fees and gas come from your purse STT. /deposit"),
             new Step("level_farming", 5, 0, null, 0, "Reach Farming 5",
-                    "Harvest crops in {farm} and wheat on your island."),
+                    "Harvest crops in {farm} and wheat on your island. Fast Travel in the SkyBlock Menu can take you to the farm."),
             new Step("discover", DISTRICTS.size(), 50, null, 0, "Discover every hub district",
-                    "Walk into every district of the hub: farm, mine, woods, ruins, mountain, lake, wharf and more. /warp helps.")
+                    "Walk into every district of the hub: farm, mine, woods, ruins, mountain, lake, wharf and more. Fast Travel in the SkyBlock Menu can take you there.")
     );
 
     /** The v1 line, for migrating saved progress. */
@@ -341,13 +341,10 @@ final class Quests implements Listener {
         }
     }
 
-    /** A step became current: hand out its tool and complete it at once if it is already true. */
+    /** A step became current: complete it at once if it is already true. */
     private void started(Player player, Profile profile, Step next) {
         if (current(profile) != next) {
             return;
-        }
-        if (next.event().equals("fish")) {
-            giveRod(player);
         }
         int have = already(player, profile, next.event());
         if (have > 0) {
@@ -391,7 +388,7 @@ final class Quests implements Listener {
         return n;
     }
 
-    /** On login: skip finished v1 steps, give the rod if the fishing step is current, apply what is already true. */
+    /** On login: skip finished v1 steps and apply what is already true. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onLogin(SbLoginEvent event) {
         Player player = event.getPlayer();
@@ -407,9 +404,6 @@ final class Quests implements Listener {
             }
             Step step = current(profile);
             if (step != null) {
-                if (step.event().equals("fish") && !hasRod(player)) {
-                    giveRod(player);
-                }
                 int have = already(player, profile, step.event());
                 if (have > 0) {
                     hit(player, step.event(), have);
@@ -418,11 +412,11 @@ final class Quests implements Listener {
         }, 60L);
     }
 
-    private static boolean hasRod(Player player) {
+    static boolean hasRod(Player player) {
         return player.getInventory().contains(Material.FISHING_ROD);
     }
 
-    private void giveRod(Player player) {
+    void giveRod(Player player) {
         if (hasRod(player)) {
             return;
         }
@@ -484,8 +478,6 @@ final class Quests implements Listener {
         }
         if (current(profile) == null) {
             finale(player);
-        } else if (current(profile).event().equals("fish") && !hasRod(player)) {
-            giveRod(player);
         }
     }
 }

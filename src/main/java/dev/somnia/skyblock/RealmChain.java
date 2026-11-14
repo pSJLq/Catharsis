@@ -84,7 +84,8 @@ final class RealmChain {
             fail.accept("SkyRealm is not configured.");
             return;
         }
-        if (online != null) {
+        boolean quiet = label != null && label.startsWith("Combat checkpoint");
+        if (online != null && !quiet) {
             online.sendMessage(Component.text("⛓ " + label + " — signing from your purse"
                     + (value.signum() > 0 ? " (" + stt(value) + " STT)" : "") + "…", NamedTextColor.DARK_AQUA));
         }
@@ -93,7 +94,10 @@ final class RealmChain {
                 TransactionReceipt receipt = plugin.wallets().sendTo(profile, contract, function, value);
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     Player now = plugin.getServer().getPlayer(owner);
-                    if (now != null) {
+                    if (quiet) {
+                        plugin.getLogger().info("Realm " + label + " confirmed for " + owner
+                                + (receipt.getTransactionHash() != null ? " " + receipt.getTransactionHash() : ""));
+                    } else if (now != null) {
                         now.sendMessage(txLine("⛓ " + label + " confirmed on Somnia", receipt.getTransactionHash()));
                     }
                     ok.accept(receipt);
