@@ -604,10 +604,11 @@ final class Mobs implements Listener {
         }
     }
 
-    /** Keep a mob within 16 blocks of its spawn point; only players inside its combat zone are targets. */
+    /** Keep a mob inside its spawn zone; only players inside that combat zone are targets. */
     private void leash(Zones.Point point, Location home, Mob mob, List<Player> players) {
         Location at = mob.getLocation();
-        if (!at.getWorld().equals(home.getWorld()) || at.distanceSquared(home) > 16 * 16 || Math.abs(at.getY() - home.getY()) > 8) {
+        String[] here = at.getWorld().equals(home.getWorld()) ? plugin.hub().zones().at(at) : null;
+        if (here == null || !point.zone().equals(here[0])) {
             mob.setTarget(null);
             mob.teleport(home);
             return;

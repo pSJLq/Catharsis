@@ -340,10 +340,17 @@ final class TabList implements Listener {
                 effects = effects.append(Component.text(", ", NamedTextColor.GRAY)).append(parts.get(i));
             }
         }
+        int ping = player.getPing();
+        NamedTextColor pingColor = ping < 100 ? NamedTextColor.GREEN
+                : ping < 200 ? NamedTextColor.YELLOW
+                : NamedTextColor.RED;
         Component footer = Component.newline()
                 .append(Component.text("Active Effects", NamedTextColor.GREEN).decoration(TextDecoration.BOLD, true))
                 .append(Component.newline()).append(effects)
                 .append(Component.newline()).append(Component.newline())
+                .append(Component.text("Ping: ", NamedTextColor.GRAY))
+                .append(Component.text(ping + " ms", pingColor))
+                .append(Component.newline())
                 .append(Component.text("somnia.network", NamedTextColor.AQUA));
         player.sendPlayerListHeaderAndFooter(header, footer);
     }
