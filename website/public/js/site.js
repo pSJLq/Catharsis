@@ -197,6 +197,8 @@
     var ev;
     try {
       ev = new view.KeyboardEvent(type, {
+        // view = the game window, so fromGame() sees this copy and it is not forwarded again (loop).
+        view: view,
         key: e.key,
         code: e.code,
         location: e.location,
