@@ -37,6 +37,23 @@ Contracts: review only in this pass, no redeploy and no transactions.
 - EaglerXServer: skin downloads only from `textures.minecraft.net`, skin/cape/brand/webview lookups rate limited,
   voice off; the plugin registers no plugin-message channels of its own.
 
+### Round 3 (bag writes, market, minions)
+
+| # | Area | Finding | Severity | Status |
+|---|------|---------|----------|--------|
+| 11 | Bag writes (`WordChain.java`) | A trusted bag write that touches more than 8 slots goes out in several batches. When the first batch landed and a later one failed (for example a purse with gas for exactly one write), the market callbacks were told "rolled back": `/bz claim` put everything back in the stash although part of it was already signed into the bag (a repeatable dupe; refunds behaved the same). | High | Fixed: a partly landed write is never reported as rolled back. With the player online the rest is signed later (every 10 s, waiting for gas); if it cannot finish, the waiting callbacks are dropped and logged instead of refunded. Live since the 2026-11-16 00:40 restart (UTC+7). |
+| 12 | Containers (`WordChain.java`) | Moving items into a chest, furnace, hopper or ender chest is a trusted bag write. With too little gas the write failed and the bag went back to its last signed state while the container kept the items (dupe). | High | Fixed: with too little gas, container clicks and drags wait (same rule as breaking and placing blocks). Booster holders are not affected (their gas is sponsored). Live since the 00:40 restart. |
+
+Reviewed with no change needed: Bazaar `buyOffer` / `sellToOrder` / `cancel` (a busy flag per offer/order plus a per-player lock, items taken before the
+bag write and returned on failure, everything on the main thread), stash claim, minions (owner only; storage
+decremented by what actually moved), SkyWord2 / Attested contracts (bag writes at most 8 slots, the menu-star slot
+can never hold an item; exported keys need a server EIP-712 attestation bound to player, contract, chain, a one-shot
+nonce and a deadline, so attestations cannot be replayed).
+
+Residual (not fixed, needs a bigger change): if a container write fails for a reason other than gas after its retries
+(RPC error, or a player with an exported key draining the purse between the check and the send), the container is
+still not rolled back. A full fix snapshots the open container at the first trusted click and restores it on rollback.
+
 ### Open items (owner decision)
 
 | Item | Note |

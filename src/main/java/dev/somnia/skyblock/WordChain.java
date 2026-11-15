@@ -610,6 +610,41 @@ final class WordChain implements Listener {
         }
     }
 
+    /**
+     * Moves between the bag and a chest, furnace, hopper or ender chest are trusted bag writes. If that write cannot
+     * be paid, the bag goes back to its last signed state but the container keeps what it got (a dupe), so with too
+     * little gas these clicks wait, like block breaks and places do.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onContainerClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player && containerGasBlocked(player, event.getView().getTopInventory())) {
+            event.setCancelled(true);
+            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onContainerDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player && containerGasBlocked(player, event.getView().getTopInventory())) {
+            event.setCancelled(true);
+            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+        }
+    }
+
+    private boolean containerGasBlocked(Player player, Inventory top) {
+        if (top == null || top.getHolder() instanceof Menu || plugin.hold().offchain(player)) {
+            return false;
+        }
+        InventoryType type = top.getType();
+        boolean container = type == InventoryType.ENDER_CHEST
+                || (top.getLocation() != null && type != InventoryType.CRAFTING && type != InventoryType.WORKBENCH && type != InventoryType.PLAYER);
+        if (!container) {
+            return false;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        return seat != null && seat.loaded && plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()));
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onClick(InventoryClickEvent event) {
         if (event.getWhoClicked() instanceof Player player && !(event.getView().getTopInventory().getHolder() instanceof Menu)) {
@@ -1000,6 +1035,43 @@ final class WordChain implements Listener {
                 }
             }, 30L);
             return;
+        }
+        if (trusted && done > 0 && done < batches.size()) {
+            // Part of a trusted write landed (writes over 8 slots go in several batches). Telling the hooks "rolled
+            // back" now would hand back things that are already in the signed bag (stash claim, refunds): a dupe.
+            // Keep the live bag and sign the rest once the purse can pay; never report this write as rolled back.
+            boolean gas = noGas(error);
+            if (online != null && !plugin.hold().offchain(online) && (gas || seat.trustFails < 30)) {
+                for (int i = 0; i < done; i++) {
+                    applyBatch(seat.words, batches.get(i));
+                }
+                if (seat.trustFails == 0 || seat.trustFails % 6 == 0) {
+                    tell(online, gas ? "Part of your inventory is signed. The rest waits for gas: use /deposit."
+                            : "Part of your inventory is signed. Retrying the rest...", NamedTextColor.YELLOW);
+                }
+                seat.trustFails++;
+                if (seat.flying != null) {
+                    seat.hooks.addAll(0, seat.flying);
+                    seat.flying = null;
+                }
+                seat.breaks.addAll(0, breaks);
+                seat.places.addAll(0, places);
+                seat.drops.addAll(0, drops);
+                seat.trustLocal = true;
+                plugin.getLogger().warning("Bag write for " + online.getName() + " landed " + done + "/" + batches.size()
+                        + " batches, signing the rest later: " + blame(error));
+                plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                    Player again = plugin.getServer().getPlayer(id);
+                    if (again != null) {
+                        schedule(again);
+                    }
+                }, 200L);
+                return;
+            }
+            int dropped = seat.flying == null ? 0 : seat.flying.size();
+            seat.flying = null;
+            plugin.getLogger().warning("Bag write for " + id + " landed " + done + "/" + batches.size() + " batches and cannot finish ("
+                    + blame(error) + "); " + dropped + " waiting market callback(s) dropped instead of rolled back (no dupe). Check the stash by hand.");
         }
         if (trusted) {
             if (done < batches.size()) {
