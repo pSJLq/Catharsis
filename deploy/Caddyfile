@@ -1,0 +1,53 @@
+# Catharsis on one VPS behind Caddy (HTTPS + WSS).
+# Replace play.example.com with the real domain. Its DNS A (and AAAA, if any) record must point at the VPS
+# before Caddy starts, so Caddy can get the certificate from Let's Encrypt on ports 80/443.
+#
+#   Browser  --https-->  Caddy :443  -->  site       127.0.0.1:8791  (pages, /api/*, the browser client)
+#   Browser  --wss--->   Caddy :443  -->  Paper      127.0.0.1:25565 (EaglerXServer WebSocket on the game port)
+#
+# The browser client keeps only scheme://host of the join address (no path) and only joins the page's own host,
+# so the game WebSocket is served on the same host as the site and is told apart by the Upgrade header.
+{
+	# Optional: address for Let's Encrypt expiry mail.
+	# email you@example.com
+}
+
+play.example.com {
+	@game {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @game {
+		reverse_proxy 127.0.0.1:25565 {
+			# The plugin (RealIp.java) reads the player's IP from X-Real-IP, only when the
+			# connection comes from network.trusted-proxies (default 127.0.0.1 and ::1).
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		# Caddy sets X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host itself and ignores
+		# those headers from visitors; the site believes them only from TRUSTED_PROXIES.
+		reverse_proxy 127.0.0.1:8791 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/catharsis.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}
+
+# Optional second name that redirects to the main one (needs its own DNS record):
+# www.play.example.com {
+# 	redir https://play.example.com{uri} permanent
+# }

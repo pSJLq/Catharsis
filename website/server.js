@@ -9,9 +9,10 @@ import { applyLayout } from './layout.js';
 import { handleExplorer } from '../explorer/server.js';
 import { handleWard, authed, originOk, readBody } from './ward.js';
 import { handleEvent } from './event.js';
+import { HOST, PORT, PUBLIC_URL, JOIN_URL, PAPER_HOST, PAPER_PORT, REWRITES, publicize } from './config.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
-const port = 8791;
+const port = PORT;
 
 const types = {
   '.html': 'text/html; charset=utf-8',
@@ -33,7 +34,7 @@ const types = {
 
 function paperOpen() {
   return new Promise((resolve) => {
-    const socket = net.connect({ host: '127.0.0.1', port: 25565, timeout: 800 });
+    const socket = net.connect({ host: PAPER_HOST, port: PAPER_PORT, timeout: 800 });
     let done = false;
     const finish = (ok) => {
       if (done) return;
@@ -212,10 +213,17 @@ async function send(res, status, file, req) {
       'Content-Type': types[ext] || 'application/octet-stream',
       'X-Content-Type-Options': 'nosniff',
     };
-    const body = Buffer.from(applyLayout(await fs.promises.readFile(file, 'utf8')));
+    const body = Buffer.from(publicize(applyLayout(await fs.promises.readFile(file, 'utf8'))));
     headers['Content-Length'] = body.length;
     headers['Cache-Control'] = 'no-store';
     res.writeHead(status, headers);
+    res.end(req && req.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  if (REWRITES && (ext === '.xml' || ext === '.txt') && st.size < BIG && path.dirname(file) === root) {
+    // robots.txt / sitemap.xml list the public address; rewritten only when PUBLIC_URL is not the local default.
+    const body = Buffer.from(publicize(await fs.promises.readFile(file, 'utf8')));
+    res.writeHead(status, { 'Content-Type': types[ext], 'X-Content-Type-Options': 'nosniff', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
     res.end(req && req.method === 'HEAD' ? undefined : body);
     return;
   }
@@ -255,7 +263,7 @@ const server = http.createServer(async (req, res) => {
     if (await handleExplorer(req, res, url.pathname)) return;
     if (url.pathname === '/api/join') {
       const body = JSON.stringify({
-        join: 'ws://127.0.0.1:25565',
+        join: JOIN_URL,
         online: await paperOpen(),
       });
       res.writeHead(200, {
@@ -289,8 +297,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log('Catharsis http://127.0.0.1:' + port);
+server.listen(port, HOST, () => {
+  console.log('Catharsis http://' + HOST + ':' + port + (PUBLIC_URL !== 'http://' + HOST + ':' + port ? ' (public ' + PUBLIC_URL + ', join ' + JOIN_URL + ')' : ''));
   // Build the compressed copies of the big client files right away instead of on the first visit.
   for (const rel of ['client/index.html', 'client/assets.epk', 'client/sounds.epk']) {
     const file = path.join(root, rel);

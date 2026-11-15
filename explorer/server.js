@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { ethers } from 'ethers';
 import { applyLayout } from '../site/layout.js';
+import { PUBLIC_URL, forwardedProto } from '../site/config.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const chain = JSON.parse(fs.readFileSync(path.join(root, 'chain.json'), 'utf8'));
@@ -1027,8 +1028,10 @@ async function deedInfo(id) {
 }
 
 function siteOrigin(req) {
+  // A configured PUBLIC_URL wins; otherwise the Host header, with https only when a trusted proxy says so.
+  if (process.env.PUBLIC_URL) return PUBLIC_URL;
   const host = String(req.headers.host || '127.0.0.1:8791').replace(/[^A-Za-z0-9.:\-\[\]]/g, '');
-  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() === 'https' ? 'https' : 'http';
+  const proto = forwardedProto(req) === 'https' ? 'https' : 'http';
   return proto + '://' + host;
 }
 

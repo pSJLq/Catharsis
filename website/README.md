@@ -14,6 +14,10 @@ Static pages, styles, fonts, and images are under `public/`. Layout partials are
 node server.js
 ```
 
-The process binds to `127.0.0.1` by default. See `server.js` for the port.
+The process binds to `127.0.0.1:8791` by default. With no environment variables it behaves exactly like the local setup.
+
+## Settings (VPS)
+
+All settings are environment variables read in `config.js`: `SITE_HOST`, `SITE_PORT`, `PUBLIC_URL` (canonical/og tags, sitemap, robots, admin origin, Secure cookie), `JOIN_URL` (the game WebSocket from `/api/join`, default `wss://<PUBLIC_URL host>`), `PAPER_HOST`/`PAPER_PORT`, `TRUSTED_PROXIES` (the only sources whose `X-Forwarded-*` headers are believed) and `ALLOWED_ORIGINS`. See `../deploy/.env.example` and `../docs/DEPLOY_VPS.md`.
 
 The Monocraft font is licensed under the SIL Open Font License (`public/fonts/OFL.txt`).

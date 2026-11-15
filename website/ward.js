@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { ALLOWED_ORIGINS, SECURE_COOKIES } from './config.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const newsFile = path.join(dataDir, 'news.json');
@@ -130,7 +131,7 @@ export function authed(req) {
 }
 
 export function originOk(req) {
-  return (req.headers.origin || '') === 'http://127.0.0.1:8791';
+  return ALLOWED_ORIGINS.indexOf(req.headers.origin || '') >= 0;
 }
 
 function checkLogin(name, password) {
@@ -187,14 +188,14 @@ export async function handleWard(req, res, pathname) {
       const token = crypto.randomBytes(24).toString('base64url');
       sessions.set(token, { exp: Date.now() + 12 * 60 * 60 * 1000 });
       sendJson(res, 200, { ok: true }, {
-        'Set-Cookie': 'catharsis_session=' + token + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200',
+        'Set-Cookie': 'catharsis_session=' + token + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200' + (SECURE_COOKIES ? '; Secure' : ''),
       });
       return true;
     }
     if (pathname === '/api/admin/logout' && req.method === 'POST') {
       sessions.delete(cookieToken(req));
       sendJson(res, 200, { ok: true }, {
-        'Set-Cookie': 'catharsis_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
+        'Set-Cookie': 'catharsis_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' + (SECURE_COOKIES ? '; Secure' : ''),
       });
       return true;
     }

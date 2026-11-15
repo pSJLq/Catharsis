@@ -1,0 +1,26 @@
+# Catharsis site (pages, /api/join, explorer, event board, and the browser client files).
+# Settings come from /etc/catharsis/site.env (copy deploy/.env.example there and edit the domain).
+# Install: sudo cp catharsis-site.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now catharsis-site
+
+[Unit]
+Description=Catharsis site
+After=network-online.target catharsis-paper.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=catharsis
+Group=catharsis
+WorkingDirectory=/opt/catharsis/site
+EnvironmentFile=/etc/catharsis/site.env
+ExecStart=/usr/bin/node /opt/catharsis/site/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

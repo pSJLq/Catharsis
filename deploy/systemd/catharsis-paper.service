@@ -1,0 +1,40 @@
+# Paper (SkyBlock plugin + EaglerXServer browser play on the same port 25565).
+# Sized for OVH VPS-3 (12 GB RAM): 6 GB heap, the rest for the OS, Caddy, the site and page cache.
+# Install: sudo cp catharsis-paper.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now catharsis-paper
+
+[Unit]
+Description=Catharsis Paper server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=catharsis
+Group=catharsis
+WorkingDirectory=/opt/catharsis/server
+# Aikar's G1 flags (the usual Paper recommendation) with a fixed 6 GB heap.
+ExecStart=/usr/bin/java -Xms6G -Xmx6G \
+  -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions \
+  -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 \
+  -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 \
+  -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 \
+  -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem \
+  -XX:MaxTenuringThreshold=1 \
+  -jar paper.jar --nogui
+# The plugin's control/stop file ends the process normally; systemd then starts it again after 10 s,
+# which is the same as keep.ps1 on Windows (drop a new jar into plugins/update first, then control/stop).
+Restart=always
+RestartSec=10
+# SIGTERM makes Paper save the worlds and stop; give it time.
+KillSignal=SIGTERM
+TimeoutStopSec=180
+SuccessExitStatus=0 143
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

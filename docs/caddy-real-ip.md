@@ -35,3 +35,5 @@ play.example.com {
 
 Each proxied connection logs one line, `Real IP <ip> for proxy socket 127.0.0.1|<port>`
 (`network.log-real-ip: false` turns it off).
+
+The full Caddyfile used for the VPS (site + game WebSocket on one host) is `deploy/Caddyfile`; the steps are in `docs/DEPLOY_VPS.md`.
