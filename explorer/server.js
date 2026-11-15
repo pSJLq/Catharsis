@@ -581,7 +581,12 @@ function sse(req, res) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > 16 * 1024) { reject(new Error('body too big')); req.destroy(); return; }
+      chunks.push(chunk);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
@@ -641,16 +646,37 @@ function sendFile(res, file, type) {
   res.end(bytes);
 }
 
-async function serveIcon(res, name) {
+// Names the CDN did not have (so a scan of random names does not become CDN requests every time).
+const iconMiss = new Set();
+
+async function serveIcon(req, res, name) {
   const file = path.join(iconDir, name + '.png');
   if (fs.existsSync(file)) {
     sendFile(res, file, 'image/png');
     return;
   }
+  if (name.length > 64 || iconMiss.has(name)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('not found');
+    return;
+  }
+  // Only icons not on disk yet reach the CDN: 20 per IP and 200 overall per minute.
+  if (!allow('icon:' + clientIp(req), 20, 60 * 1000) || !allow('icon:*', 200, 60 * 1000)) {
+    res.writeHead(429, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': '60' });
+    res.end('slow down');
+    return;
+  }
   for (const folder of ['item', 'block']) {
-    const response = await fetch(CDN + folder + '/' + name + '.png');
+    let response;
+    try {
+      response = await fetch(CDN + folder + '/' + name + '.png', { signal: AbortSignal.timeout(8000) });
+    } catch {
+      continue;
+    }
     if (!response.ok) continue;
     const bytes = Buffer.from(await response.arrayBuffer());
+    // Keep only real, small PNGs.
+    if (bytes.length > 256 * 1024 || bytes.length < 8 || bytes.readUInt32BE(0) !== 0x89504e47) continue;
     fs.mkdirSync(iconDir, { recursive: true });
     fs.writeFileSync(file, bytes);
     res.writeHead(200, {
@@ -661,6 +687,8 @@ async function serveIcon(res, name) {
     res.end(bytes);
     return;
   }
+  if (iconMiss.size > 5000) iconMiss.clear();
+  iconMiss.add(name);
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('not found');
 }
@@ -1024,6 +1052,7 @@ async function deedInfo(id) {
       },
     };
   }
+  if (deedCache.size > 5000) deedCache.clear();
   deedCache.set(id, { at: Date.now(), data });
   return data;
 }
@@ -1056,6 +1085,13 @@ async function handleDeed(req, res, route) {
   const id = Number(m[1]);
   if (!Number.isSafeInteger(id) || id < 1) {
     sendJson(res, 404, { error: 'No island deed with that number.' });
+    return true;
+  }
+  const fresh = deedCache.get(id);
+  // Uncached deeds cost RPC calls: 60 per IP and 600 overall per minute (wallets and marketplaces stay far below).
+  if (!(fresh && Date.now() - fresh.at < 30000)
+    && (!allow('deed:' + clientIp(req), 60, 60 * 1000) || !allow('deed:*', 600, 60 * 1000))) {
+    sendJson(res, 429, { error: 'Too many lookups. Wait a minute.' });
     return true;
   }
   let info;
@@ -1180,7 +1216,7 @@ export async function handleExplorer(req, res, pathname) {
   }
   const icon = route.match(/^\/icons\/([a-z0-9_]+)\.png$/);
   if (icon) {
-    await serveIcon(res, icon[1]);
+    await serveIcon(req, res, icon[1]);
     return true;
   }
   return false;

@@ -32,7 +32,17 @@ const types = {
   '.wasm': 'application/wasm',
 };
 
+// One probe per 5 seconds at most, shared by all callers, so /api/join floods do not become connection floods on Paper.
+let paperProbe = null;
+let paperProbeAt = 0;
 function paperOpen() {
+  if (paperProbe && Date.now() - paperProbeAt < 5000) return paperProbe;
+  paperProbeAt = Date.now();
+  paperProbe = paperProbeOnce();
+  return paperProbe;
+}
+
+function paperProbeOnce() {
   return new Promise((resolve) => {
     const socket = net.connect({ host: PAPER_HOST, port: PAPER_PORT, timeout: 800 });
     let done = false;
