@@ -64,6 +64,57 @@ final class ItemSync implements Listener {
         });
     }
 
+    /**
+     * Item frames and armor stands take items out of the bag into the world (and give them back). If that bag write
+     * cannot be paid, the bag goes back to its last signed state while the frame or stand keeps the item (a dupe),
+     * so with too little gas these uses wait, like block breaks and places do. Picking items up waits too, so a
+     * pickup is not taken away again by a rolled-back write.
+     */
+    private boolean gasBlocked(Player player) {
+        return chainBag(player) && plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()));
+    }
+
+    private void tellGas(Player player) {
+        player.sendActionBar(Component.text("Not enough STT for gas, use /deposit.", NamedTextColor.RED));
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFrameOrStand(PlayerInteractEntityEvent event) {
+        org.bukkit.entity.Entity target = event.getRightClicked();
+        // Only a player-placed frame or stand (plugin stands such as minions and NPC labels carry scoreboard tags),
+        // and only with an item in hand (that is the move from the bag into the world).
+        org.bukkit.inventory.ItemStack hand = event.getPlayer().getInventory().getItem(event.getHand());
+        boolean world = target instanceof org.bukkit.entity.ItemFrame
+                || (target instanceof org.bukkit.entity.ArmorStand && target.getScoreboardTags().isEmpty());
+        if (world && hand != null && !hand.getType().isAir() && gasBlocked(event.getPlayer())) {
+            event.setCancelled(true);
+            tellGas(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onStandGas(PlayerArmorStandManipulateEvent event) {
+        if (event.getRightClicked().getScoreboardTags().isEmpty() && !event.getPlayerItem().getType().isAir() && gasBlocked(event.getPlayer())) {
+            event.setCancelled(true);
+            tellGas(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onHangingPlace(org.bukkit.event.hanging.HangingPlaceEvent event) {
+        if (event.getPlayer() != null && gasBlocked(event.getPlayer())) {
+            event.setCancelled(true);
+            tellGas(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPickupGas(EntityPickupItemEvent event) {
+        if (event.getEntity() instanceof Player player && gasBlocked(player)) {
+            event.setCancelled(true);
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onComposter(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getHand() != EquipmentSlot.HAND) {

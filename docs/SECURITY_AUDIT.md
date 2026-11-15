@@ -54,9 +54,23 @@ Residual (not fixed, needs a bigger change): if a container write fails for a re
 (RPC error, or a player with an exported key draining the purse between the check and the send), the container is
 still not rolled back. A full fix snapshots the open container at the first trusted click and restores it on rollback.
 
+### Round 4 (auctions, world items, rewards)
+
+| # | Area | Finding | Severity | Status |
+|---|------|---------|----------|--------|
+| 13 | Item frames, armor stands, pickups (`ItemSync.java`) | Putting an item into an item frame or onto an armor stand is a trusted bag write. With too little gas the write rolled back the bag while the frame or stand kept the item (dupe, same class as #12). A pickup with too little gas could be taken away again by the rollback. | High | Fixed: with too little gas, putting items into player-placed frames/stands, placing frames, and picking items up wait (plugin stands such as minions and NPC labels are not affected; Booster gas is sponsored). Live since the 2026-11-16 00:46 restart (UTC+7). |
+
+Reviewed with no change needed: auctions (no bids on your own lot, a busy flag per lot during bids and settling, outbid
+STT refunded by the contract's pull refund, items delivered only after the settle receipt), Buy-It-Now (busy flag
+between buy and cancel, expired listings returned without a transaction, expiry skipped while a buy is in flight),
+dropping items (drops are burned through the bag write, nothing lands in the world), deaths (keep-inventory on hub and
+islands), quests (one linear step counter, each reward once), co-op join/leave (the player's own data is wiped on
+both), guests (no break/place/containers/drops/armor stands).
+
 ### Open items (owner decision)
 
 | Item | Note |
 |------|------|
 | Gas sponsorship for Booster holders has no cap | A Booster holder whose purse is short on gas gets a 0.02 STT float from the admin wallet each time. Withdrawing or exporting the key and moving the float out, then triggering another write, repeats it. A daily cap per purse would stop draining without changing normal play. |
+| `/island reset` has no cooldown | Each reset rebuilds the starter island and refills the starter chest (dirt, grass, cobblestone, water and lava buckets, bone meal). Low value, but repeatable; a cooldown would be a gameplay choice. |
 | Login lockout also locks the name | 5 wrong passwords lock the name (and IP) for a while, which stops brute force but lets anyone lock a known name out for that time. |
