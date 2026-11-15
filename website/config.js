@@ -101,3 +101,19 @@ export function publicize(text) {
 }
 
 export const REWRITES = PUBLIC_URL !== DEFAULT_PUBLIC_URL || JOIN_URL !== DEFAULT_JOIN_URL;
+
+// Small in-memory rate limiter: true while `key` has made at most `max` hits in the last `windowMs`.
+const hits = new Map();
+export function allow(key, max, windowMs) {
+  const now = Date.now();
+  let row = hits.get(key);
+  if (!row || now - row.start >= windowMs) {
+    row = { start: now, n: 0 };
+    hits.set(key, row);
+  }
+  row.n++;
+  if (hits.size > 20000) {
+    for (const [k, v] of hits) if (now - v.start >= 3600000) hits.delete(k);
+  }
+  return row.n <= max;
+}

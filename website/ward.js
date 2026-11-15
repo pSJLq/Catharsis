@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { ALLOWED_ORIGINS, SECURE_COOKIES } from './config.js';
+import { ALLOWED_ORIGINS, SECURE_COOKIES, clientIp, allow } from './config.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const newsFile = path.join(dataDir, 'news.json');
@@ -180,8 +180,14 @@ export async function handleWard(req, res, pathname) {
   }
   try {
     if (pathname === '/api/admin/login' && req.method === 'POST') {
+      // Brute force / CPU guard: 10 tries per IP per 15 minutes, 60 per minute overall (each try is a scrypt).
+      const ip = clientIp(req);
+      if (!allow('login:' + ip, 10, 15 * 60 * 1000) || !allow('login:*', 60, 60 * 1000)) {
+        sendJson(res, 429, { error: 'Too many tries. Wait a few minutes.' });
+        return true;
+      }
       const body = await readBody(req);
-      if (!checkLogin(body.name, body.password)) {
+      if (String(body.name || '').length > 128 || String(body.password || '').length > 256 || !checkLogin(body.name, body.password)) {
         sendJson(res, 401, { error: 'Wrong name or password.' });
         return true;
       }

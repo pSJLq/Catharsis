@@ -193,6 +193,21 @@ sudo systemctl reload caddy
 DNS first: an `A` record for the domain to `VPS_IP` (and `AAAA` for the IPv6 address if you use it). Caddy gets the
 certificate by itself on the first request.
 
+### EaglerXServer rate limits behind Caddy
+
+`listener.yml` exempts `127.0.0.0/8` from EaglerXServer's own rate limits (login, HTTP, MOTD/query). Behind Caddy
+every browser player arrives from `127.0.0.1`, so those limits stop working on the VPS. The plugin's own per-IP rules
+(registration cap, login lockout) still work through `RealIp.java`, but connection floods are no longer throttled.
+Turn on EaglerXServer's forwarding on the VPS only (local play on the PC needs no change):
+
+1. Make a secret: `head -c 32 /dev/urandom | base64 | tr -d '/+=' > ~/catharsis/server/plugins/EaglercraftXServer/eagler_forwarding.secret`
+2. In `server/plugins/EaglercraftXServer/listener.yml`: `forward_ip: true`, `forward_secret: true`
+   (header names stay `X-Real-IP` / `X-Eagler-Secret`).
+3. In the `@game` block of `/etc/caddy/Caddyfile`, next to `header_up X-Real-IP {remote_host}`, add
+   `header_up X-Eagler-Secret <the secret>` (only in `/etc/caddy`, never in git), then reload Caddy and restart Paper.
+
+Now the limits count per real IP, a direct WebSocket without the secret cannot fake its address, and `RealIp.java`
+simply sees the real address as the socket address.
 ## 8. Checks after the move
 
 - `https://<domain>/` opens; `https://<domain>/#play` loads the client and joins (browser play is the main path).

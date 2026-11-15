@@ -48,7 +48,22 @@ final class MoveServer {
             write(exchange, 405, "{\"ok\":false,\"error\":\"POST only\"}");
             return;
         }
-        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        // Local tools only. A web page in any browser on this machine could otherwise POST here (form/no-cors
+        // requests carry an Origin and a simple content type; DNS rebinding carries a foreign Host).
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+        String type = exchange.getRequestHeaders().getFirst("Content-Type");
+        String host = exchange.getRequestHeaders().getFirst("Host");
+        if (origin != null || type == null || !type.toLowerCase(java.util.Locale.ROOT).startsWith("application/json")
+                || host == null || !(host.equals("127.0.0.1:8790") || host.equals("localhost:8790"))) {
+            write(exchange, 403, "{\"ok\":false,\"error\":\"Local tools only\"}");
+            return;
+        }
+        byte[] raw = exchange.getRequestBody().readNBytes(4097);
+        if (raw.length > 4096) {
+            write(exchange, 413, "{\"ok\":false,\"error\":\"Too big\"}");
+            return;
+        }
+        String body = new String(raw, StandardCharsets.UTF_8);
         int from = number(body, "from");
         int to = number(body, "to");
         if (from < 0 || to < 0) {

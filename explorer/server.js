@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { ethers } from 'ethers';
 import { applyLayout } from '../site/layout.js';
-import { PUBLIC_URL, forwardedProto } from '../site/config.js';
+import { PUBLIC_URL, forwardedProto, clientIp, allow } from '../site/config.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const chain = JSON.parse(fs.readFileSync(path.join(root, 'chain.json'), 'utf8'));
@@ -165,6 +165,7 @@ const gear = new ethers.Contract(GEAR_PRETTY, gearIface, provider);
 const txs = [];
 const byHash = new Map();
 const clients = new Set();
+const sseByIp = new Map();
 let bagState = null;
 let bagDelay = 300;
 let bagBusy = false;
@@ -1107,6 +1108,14 @@ export async function handleExplorer(req, res, pathname) {
   const route = pathname || url.pathname;
   if (await handleDeed(req, res, route)) return true;
   if (route === '/events') {
+    // Live feed: at most 6 open streams per IP and 800 overall.
+    const ip = clientIp(req);
+    if (clients.size >= 800 || (sseByIp.get(ip) || 0) >= 6) {
+      sendJson(res, 429, { error: 'Too many live feeds open.' });
+      return true;
+    }
+    sseByIp.set(ip, (sseByIp.get(ip) || 0) + 1);
+    req.on('close', () => { const n = (sseByIp.get(ip) || 1) - 1; if (n > 0) sseByIp.set(ip, n); else sseByIp.delete(ip); });
     sse(req, res);
     return true;
   }
@@ -1115,6 +1124,10 @@ export async function handleExplorer(req, res, pathname) {
     return true;
   }
   if (route === '/api/tx') {
+    if (!allow('tx:' + clientIp(req), 30, 60 * 1000)) {
+      sendJson(res, 429, { error: 'Too many lookups. Wait a minute.' });
+      return true;
+    }
     const hash = url.searchParams.get('hash') || '';
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
       sendJson(res, 400, { error: 'That is not a transaction hash.' });

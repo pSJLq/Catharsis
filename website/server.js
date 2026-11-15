@@ -212,6 +212,9 @@ async function send(res, status, file, req) {
     const headers = {
       'Content-Type': types[ext] || 'application/octet-stream',
       'X-Content-Type-Options': 'nosniff',
+      // Pages may only be framed by this site (the play page frames the client); stops clickjacking of /admin.
+      'X-Frame-Options': 'SAMEORIGIN',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
     };
     const body = Buffer.from(publicize(applyLayout(await fs.promises.readFile(file, 'utf8'))));
     headers['Content-Length'] = body.length;
