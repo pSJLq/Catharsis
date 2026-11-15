@@ -23,3 +23,23 @@ chat/interact/inventory/drop/pickup are gated), real IP handling (`RealIp.java` 
 HTTP size limits, rate limits and disabled voice.
 
 Contracts: review only in this pass, no redeploy and no transactions.
+
+### Round 2 review (plugin, no code change needed)
+
+- GUIs: `Market.View`, `SbMenu.View` and `Menu` cancel every click and drag (shift-click, number keys and double-click
+  included); the trade window only accepts items in the player's own offer slots, and the bag is re-shown from the
+  chain when a trade ends. Trades are closed while Word mode is on.
+- Merchant: a sale removes the item before coins are paid, coins come only after the bag write lands, and buy-back
+  removes its entry after paying; everything runs on the main thread, so double clicks cannot pay twice.
+- Commands are not written to the server log (`spigot.yml commands.log: false`), so `/login`, `/register` and
+  `/exportkey confirm <password>` passwords stay out of the logs. Key export needs the password again.
+- Chat and click actions use plain text components; player names are checked by Paper (letters, digits, underscore).
+- EaglerXServer: skin downloads only from `textures.minecraft.net`, skin/cape/brand/webview lookups rate limited,
+  voice off; the plugin registers no plugin-message channels of its own.
+
+### Open items (owner decision)
+
+| Item | Note |
+|------|------|
+| Gas sponsorship for Booster holders has no cap | A Booster holder whose purse is short on gas gets a 0.02 STT float from the admin wallet each time. Withdrawing or exporting the key and moving the float out, then triggering another write, repeats it. A daily cap per purse would stop draining without changing normal play. |
+| Login lockout also locks the name | 5 wrong passwords lock the name (and IP) for a while, which stops brute force but lets anyone lock a known name out for that time. |
