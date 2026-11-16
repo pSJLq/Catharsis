@@ -921,15 +921,40 @@ final class Market implements Listener {
         for (Map.Entry<String, Integer> mat : recipe.mats().entrySet()) {
             take(player, mat.getKey(), mat.getValue());
         }
-        giveOrStash(player.getUniqueId(), recipe.result(), recipe.qty(), true);
+        // Materials out and the result in go in one bag write. If it is rolled back, the signed bag still has the
+        // materials and not the result, so only the coins come back (stashing the result here was a dupe).
+        giveOrStash(player.getUniqueId(), recipe.result(), recipe.qty(), false);
+        UUID smith = player.getUniqueId();
+        long paid = recipe.coins();
+        String forged = recipe.result();
+        afterBag(player, ok -> {
+            if (ok) {
+                Player online = plugin.getServer().getPlayer(smith);
+                if (online == null) {
+                    return;
+                }
+                if (forged.endsWith("_helmet") || forged.endsWith("_chestplate") || forged.endsWith("_leggings") || forged.endsWith("_boots")) {
+                    plugin.quests().hit(online, "forge_armor", 1);
+                } else if (forged.endsWith("_sword") || forged.endsWith("_blade") || forged.endsWith("cleaver")) {
+                    plugin.quests().hit(online, "forge_sword", 1);
+                }
+                return;
+            }
+            if (paid <= 0) {
+                return;
+            }
+            Player online = plugin.getServer().getPlayer(smith);
+            Profile back = plugin.profiles().get(smith);
+            if (online != null) {
+                plugin.stats().addCoins(online, paid);
+            } else {
+                back.coins += paid;
+            }
+            plugin.profiles().save(back);
+            message(smith, "Forge cancelled: the bag write did not land, your materials and coins stayed.");
+        });
         player.sendMessage(Component.text("Forged " + label(recipe.result()) + "!", NamedTextColor.GREEN));
         player.playSound(player.getLocation(), Sound.BLOCK_ANVIL_USE, 0.8f, 1f);
-        String forged = recipe.result();
-        if (forged.endsWith("_helmet") || forged.endsWith("_chestplate") || forged.endsWith("_leggings") || forged.endsWith("_boots")) {
-            plugin.quests().hit(player, "forge_armor", 1);
-        } else if (forged.endsWith("_sword") || forged.endsWith("_blade") || forged.endsWith("cleaver")) {
-            plugin.quests().hit(player, "forge_sword", 1);
-        }
     }
 
     // ---------- Bazaar ----------

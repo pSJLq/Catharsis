@@ -34,6 +34,7 @@ cookie:
   days: 4
   gate-commands: true        # without the buff, /ah /bz /bank (and their menu buttons) are closed; the hub NPCs always work
   sponsor-topup-stt: 0.02    # buff holders: the admin wallet tops the purse up by at least this when gas is short
+  sponsor-daily-cap-stt: 0.2 # max sponsored top-ups per purse per rolling 24h (persisted; stops drain if the key is emptied)
 event:
   # Launch event prizes, claimed in game with /event claim after the website admin finalizes the reviewed winners.
   # Paid in SOMI on Somnia mainnet (cookie.mainnet-rpc / cookie.mainnet-chain-id) from the prize wallet. Its private

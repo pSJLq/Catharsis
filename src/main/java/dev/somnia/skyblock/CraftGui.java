@@ -57,6 +57,7 @@ final class CraftGui implements Listener {
         boolean locked;
         boolean returned;
         boolean dirty;
+        java.util.function.Consumer<Boolean> afterWrite;
 
         View() {
             inventory = Bukkit.createInventory(this, 54, Component.text("Craft Item"));
@@ -389,8 +390,9 @@ final class CraftGui implements Listener {
         }
         giveBack(player, view);
         stripDisplay(player);
-        if (plugin.words() != null && view.dirty) {
-            plugin.words().commitLocal(player);
+        if (plugin.words() != null && (view.dirty || view.afterWrite != null)) {
+            plugin.words().commitLocal(player, view.afterWrite);
+            view.afterWrite = null;
             view.dirty = false;
         }
     }
@@ -401,8 +403,9 @@ final class CraftGui implements Listener {
         if (player.getOpenInventory().getTopInventory().getHolder() instanceof View view) {
             giveBack(player, view);
             stripDisplay(player);
-            if (plugin.words() != null && view.dirty) {
-                plugin.words().commitLocal(player);
+            if (plugin.words() != null && (view.dirty || view.afterWrite != null)) {
+                plugin.words().commitLocal(player, view.afterWrite);
+                view.afterWrite = null;
                 view.dirty = false;
             }
         }
@@ -483,10 +486,29 @@ final class CraftGui implements Listener {
         Runnable free = SbMenu.reserveStar(player);
         Map<Integer, ItemStack> over = player.getInventory().addItem(give.toArray(ItemStack[]::new));
         free.run();
+        // Grid stacks are still in the signed bag until the next write. Dropping the overflow on the ground before
+        // that write landed was a dupe when the write was rolled back (bag repainted, items still on the ground):
+        // bag items go to the player (or the stash) only after the write lands.
+        java.util.Map<String, Integer> later = new java.util.LinkedHashMap<>();
         for (ItemStack left : over.values()) {
-            if (!empty(left)) {
-                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            if (empty(left)) {
+                continue;
             }
+            String key = plugin.words() == null ? null : HoldItems.keyOf(left, plugin);
+            if (key == null) {
+                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            } else {
+                later.merge(key, left.getAmount(), Integer::sum);
+            }
+        }
+        if (!later.isEmpty()) {
+            java.util.UUID id = player.getUniqueId();
+            player.sendMessage(Component.text("Your bag is full: the rest of the grid goes to your stash. /bz claim", NamedTextColor.YELLOW));
+            plugin.words().commitLocal(player, ok -> {
+                if (ok) {
+                    later.forEach((key, qty) -> plugin.market().giveOrStash(id, key, qty, true));
+                }
+            });
         }
     }
 
@@ -577,10 +599,15 @@ final class CraftGui implements Listener {
             }
         };
         // Write now only if the grid is empty so leftovers are not dropped from the bag snapshot.
-        // Otherwise the close/quit path signs inventory + returned leftovers together.
+        // Otherwise the close/quit path signs inventory + returned leftovers together; XP waits for that write.
         player.sendMessage(Component.text("Crafted ", NamedTextColor.GREEN).append(Component.text(label + " x" + amount, NamedTextColor.WHITE)));
         if (plugin.words() != null && !gridBusy(player)) {
             plugin.words().commitLocal(player, done);
+            refresh(player, view);
+            return;
+        }
+        if (plugin.words() != null) {
+            view.afterWrite = done;
             refresh(player, view);
             return;
         }

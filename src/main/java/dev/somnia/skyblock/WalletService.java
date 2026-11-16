@@ -1,6 +1,12 @@
 package dev.somnia.skyblock;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
@@ -32,9 +38,13 @@ import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -66,6 +76,13 @@ final class WalletService {
     private volatile BigInteger lastFeeWei;
     /** Conservative gas units used only when no write has computed a fee yet (main-thread, no RPC). */
     private static final BigInteger DEFAULT_GAS_UNITS = BigInteger.valueOf(450_000L);
+    private static final long SPONSOR_WINDOW_MS = 24L * 60L * 60L * 1000L;
+    private static final long CAP_HINT_EVERY_MS = 60_000L;
+    private final File sponsorFile;
+    private final Object sponsorLock = new Object();
+    /** Purse (lower-case) -> sponsored top-ups in the rolling 24h window. */
+    private final Map<String, List<SponsorTopUp>> sponsorLog = new ConcurrentHashMap<>();
+    private final Map<String, Long> capHinted = new ConcurrentHashMap<>();
 
     WalletService(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
@@ -82,6 +99,8 @@ final class WalletService {
         this.web3 = Web3j.build(rpc);
         plugin.getLogger().info("Shannon RPC " + String.join(", ", endpoints));
         this.secretsFile = new File(plugin.getDataFolder(), "secrets.yml");
+        this.sponsorFile = new File(plugin.getDataFolder(), "sponsor-topups.json");
+        loadSponsorLog();
         YamlConfiguration yaml = YamlConfiguration.loadConfiguration(secretsFile);
         this.deployerAddress = yaml.getString("deployer-address", "");
         String signerKey = yaml.getString("signer-key", "");
@@ -220,6 +239,7 @@ final class WalletService {
     }
 
     void close() {
+        saveSponsorLog();
         web3.shutdown();
     }
 
@@ -1219,20 +1239,34 @@ final class WalletService {
 
     /**
      * Main-thread safe. True when the cached Shannon purse is below the gas fee cap and a Booster Cookie
-     * is not sponsoring gas. Unknown cache is optimistic (false) until a balance read lands.
+     * cannot cover the shortfall (no buff, or the per-purse daily sponsor cap is already used). Unknown
+     * cache is optimistic (false) until a balance read lands.
      */
     boolean shortOnGas(Profile profile) {
         if (profile == null || profile.wallet == null || profile.wallet.isBlank()) {
-            return false;
-        }
-        if (plugin.cookies() != null && plugin.cookies().active(profile)) {
             return false;
         }
         BigInteger bal = cachedBalance(profile.wallet);
         if (bal == null) {
             return false;
         }
-        return bal.compareTo(gasFeeCap()) < 0;
+        if (bal.compareTo(gasFeeCap()) >= 0) {
+            return false;
+        }
+        return !canSponsor(profile);
+    }
+
+    /** True when a Booster is active and this purse still has room under the daily sponsor cap. */
+    boolean canSponsor(Profile profile) {
+        return plugin.cookies() != null && plugin.cookies().active(profile) && !sponsorCapReached(profile);
+    }
+
+    /** True when this purse has already received the configured daily sponsored STT (rolling 24h). */
+    boolean sponsorCapReached(Profile profile) {
+        if (profile == null || profile.wallet == null || profile.wallet.isBlank()) {
+            return false;
+        }
+        return remainingSponsor(profile.wallet).signum() <= 0;
     }
 
     List<Type> viewRealm(Function function) throws IOException {
@@ -1554,9 +1588,10 @@ final class WalletService {
     }
 
     /**
-     * Booster Cookie holders: when the purse is short only by gas, the admin wallet sends the missing STT first
-     * (no cap, Shiny's choice). The value of a write (bids, fees) is never sponsored, and neither is /withdraw, so the
-     * float cannot be cashed out for free. Returns the balance to use.
+     * Booster Cookie holders: when the purse is short only by gas, the admin wallet sends the missing STT first.
+     * Each purse is capped at cookie.sponsor-daily-cap-stt (default 0.2) in any rolling 24h, persisted in
+     * sponsor-topups.json, so exporting the key and emptying the float cannot drain the admin wallet. The value of
+     * a write (bids, fees) is never sponsored, and neither is /withdraw. Returns the balance to use.
      */
     private BigInteger sponsored(Profile profile, String from, BigInteger balance, BigInteger need, BigInteger gasPart) {
         if (balance.compareTo(need) >= 0 || plugin.cookies() == null || !plugin.cookies().active(profile)) {
@@ -1567,11 +1602,16 @@ final class WalletService {
             return balance;
         }
         // Top up a small float (cookie.sponsor-topup-stt, default 0.02) so a run of bag writes needs one top-up, not one each.
-        BigInteger floatWei;
-        try {
-            floatWei = Convert.toWei(new BigDecimal(plugin.getConfig().getString("cookie.sponsor-topup-stt", "0.02").trim()), Convert.Unit.ETHER).toBigInteger();
-        } catch (Exception exception) {
-            floatWei = new BigInteger("20000000000000000");
+        BigInteger floatWei = sponsorTopUpWei();
+        BigInteger room = remainingSponsor(from);
+        if (room.signum() <= 0 || missing.compareTo(room) > 0) {
+            plugin.getLogger().warning("Gas sponsor cap: " + from + " used " + format(sponsorUsed(from)) + " STT in 24h (cap "
+                    + format(sponsorCapWei()) + "), skipped top-up of " + format(missing) + " STT.");
+            tellSponsorCap(profile);
+            return balance;
+        }
+        if (floatWei.compareTo(room) > 0) {
+            floatWei = room;
         }
         if (missing.compareTo(floatWei) < 0) {
             missing = floatWei;
@@ -1603,12 +1643,180 @@ final class WalletService {
             if (receipt == null || !receipt.isStatusOK()) {
                 throw new IllegalStateException("top-up " + hash + " did not land");
             }
-            plugin.getLogger().info("Gas sponsor: " + format(missing) + " STT to " + from + " (Booster Cookie) " + hash);
+            noteSponsor(from, missing);
+            plugin.getLogger().info("Gas sponsor: " + format(missing) + " STT to " + from + " (Booster Cookie) " + hash
+                    + " (" + format(sponsorUsed(from)) + "/" + format(sponsorCapWei()) + " STT in 24h)");
             return readBalance(from);
         } catch (Exception exception) {
             plugin.getLogger().warning("Gas sponsor failed for " + from + ": " + exception.getMessage());
             return balance;
         }
+    }
+
+    static String sponsorCapMessage() {
+        return "Daily sponsored gas limit reached. Deposit STT with /deposit, or wait 24 hours.";
+    }
+
+    void tellSponsorCap(Profile profile) {
+        if (profile == null) {
+            return;
+        }
+        String key = profile.wallet == null ? profile.uuid.toString() : profile.wallet.toLowerCase(Locale.ROOT);
+        long now = System.currentTimeMillis();
+        Long last = capHinted.get(key);
+        if (last != null && now - last < CAP_HINT_EVERY_MS) {
+            return;
+        }
+        capHinted.put(key, now);
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            Player online = plugin.getServer().getPlayer(profile.uuid);
+            if (online != null && online.isOnline()) {
+                online.sendMessage(Component.text(sponsorCapMessage(), NamedTextColor.RED));
+            }
+        });
+    }
+
+    private BigInteger sponsorTopUpWei() {
+        try {
+            return Convert.toWei(new BigDecimal(plugin.getConfig().getString("cookie.sponsor-topup-stt", "0.02").trim()), Convert.Unit.ETHER).toBigInteger();
+        } catch (Exception exception) {
+            return new BigInteger("20000000000000000");
+        }
+    }
+
+    private BigInteger sponsorCapWei() {
+        try {
+            return Convert.toWei(new BigDecimal(plugin.getConfig().getString("cookie.sponsor-daily-cap-stt", "0.2").trim()), Convert.Unit.ETHER).toBigInteger();
+        } catch (Exception exception) {
+            return new BigInteger("200000000000000000");
+        }
+    }
+
+    private String sponsorKey(String from) {
+        return from == null ? "" : from.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private List<SponsorTopUp> sponsorList(String from) {
+        return sponsorLog.computeIfAbsent(sponsorKey(from), ignored -> new ArrayList<>());
+    }
+
+    private void pruneSponsor(List<SponsorTopUp> list, long now) {
+        long cut = now - SPONSOR_WINDOW_MS;
+        Iterator<SponsorTopUp> it = list.iterator();
+        while (it.hasNext()) {
+            if (it.next().at < cut) {
+                it.remove();
+            }
+        }
+    }
+
+    private BigInteger sponsorUsed(String from) {
+        synchronized (sponsorLock) {
+            List<SponsorTopUp> list = sponsorList(from);
+            pruneSponsor(list, System.currentTimeMillis());
+            BigInteger sum = BigInteger.ZERO;
+            for (SponsorTopUp row : list) {
+                sum = sum.add(row.wei);
+            }
+            return sum;
+        }
+    }
+
+    private BigInteger remainingSponsor(String from) {
+        BigInteger cap = sponsorCapWei();
+        BigInteger used = sponsorUsed(from);
+        return used.compareTo(cap) >= 0 ? BigInteger.ZERO : cap.subtract(used);
+    }
+
+    private void noteSponsor(String from, BigInteger wei) {
+        if (from == null || wei == null || wei.signum() <= 0) {
+            return;
+        }
+        synchronized (sponsorLock) {
+            List<SponsorTopUp> list = sponsorList(from);
+            pruneSponsor(list, System.currentTimeMillis());
+            list.add(new SponsorTopUp(System.currentTimeMillis(), wei));
+        }
+        saveSponsorLog();
+    }
+
+    private void loadSponsorLog() {
+        if (sponsorFile == null || !sponsorFile.isFile()) {
+            return;
+        }
+        try {
+            JsonObject root = JsonParser.parseString(Files.readString(sponsorFile.toPath(), StandardCharsets.UTF_8)).getAsJsonObject();
+            long now = System.currentTimeMillis();
+            synchronized (sponsorLock) {
+                sponsorLog.clear();
+                for (var e : root.entrySet()) {
+                    if (!e.getValue().isJsonArray()) {
+                        continue;
+                    }
+                    List<SponsorTopUp> list = new ArrayList<>();
+                    for (var row : e.getValue().getAsJsonArray()) {
+                        if (!row.isJsonArray() || row.getAsJsonArray().size() < 2) {
+                            continue;
+                        }
+                        JsonArray pair = row.getAsJsonArray();
+                        long at = pair.get(0).getAsLong();
+                        BigInteger wei;
+                        try {
+                            wei = new BigInteger(pair.get(1).getAsString());
+                        } catch (RuntimeException ignored) {
+                            continue;
+                        }
+                        if (at > now - SPONSOR_WINDOW_MS && wei.signum() > 0) {
+                            list.add(new SponsorTopUp(at, wei));
+                        }
+                    }
+                    if (!list.isEmpty()) {
+                        sponsorLog.put(e.getKey().toLowerCase(Locale.ROOT), list);
+                    }
+                }
+            }
+            plugin.getLogger().info("Gas sponsor log: " + sponsorLog.size() + " purse(s) with top-ups in the last 24h.");
+        } catch (Exception exception) {
+            plugin.getLogger().warning("Could not read sponsor-topups.json (" + exception.getMessage() + "); starting an empty 24h window.");
+        }
+    }
+
+    private void saveSponsorLog() {
+        if (sponsorFile == null) {
+            return;
+        }
+        JsonObject root = new JsonObject();
+        synchronized (sponsorLock) {
+            long now = System.currentTimeMillis();
+            for (var e : sponsorLog.entrySet()) {
+                pruneSponsor(e.getValue(), now);
+                if (e.getValue().isEmpty()) {
+                    continue;
+                }
+                JsonArray arr = new JsonArray();
+                for (SponsorTopUp row : e.getValue()) {
+                    JsonArray pair = new JsonArray();
+                    pair.add(row.at);
+                    pair.add(row.wei.toString());
+                    arr.add(pair);
+                }
+                root.add(e.getKey(), arr);
+            }
+        }
+        try {
+            File tmp = new File(sponsorFile.getPath() + ".tmp");
+            Files.writeString(tmp.toPath(), root.toString(), StandardCharsets.UTF_8);
+            Files.move(tmp.toPath(), sponsorFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception exception) {
+            try {
+                Files.writeString(sponsorFile.toPath(), root.toString(), StandardCharsets.UTF_8);
+            } catch (Exception ignored) {
+                plugin.getLogger().warning("Could not save sponsor-topups.json: " + exception.getMessage());
+            }
+        }
+    }
+
+    private record SponsorTopUp(long at, BigInteger wei) {
     }
 
     /** Player text for a purse that cannot cover a mainnet payment plus a plain transfer's network fee. */

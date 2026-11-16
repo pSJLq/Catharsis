@@ -279,6 +279,13 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
 
     private boolean giveCraft(Player player, Profile profile, boolean cobble) {
         Material material = cobble ? Material.COBBLESTONE : Material.OAK_LOG;
+        Runnable free = SbMenu.reserveStar(player);
+        int empty = player.getInventory().firstEmpty();
+        free.run();
+        if (empty < 0) {
+            player.sendMessage(Component.text("Free an inventory slot first.", NamedTextColor.RED));
+            return false;
+        }
         if (!take(player, material, ProgressMath.CRAFT_COST)) {
             player.sendMessage(Component.text(
                     "You need " + ProgressMath.CRAFT_COST + " plain " + (cobble ? "cobblestone" : "oak") + " in your inventory.",
@@ -287,20 +294,33 @@ final class SkyCommands implements CommandExecutor, TabCompleter {
             return false;
         }
         ItemStack reward = cobble ? Items.enchantedCobble(plugin) : Items.enchantedOak(plugin);
+        free = SbMenu.reserveStar(player);
         Map<Integer, ItemStack> leftovers = player.getInventory().addItem(reward);
-        for (ItemStack leftover : leftovers.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+        free.run();
+        if (!leftovers.isEmpty()) {
+            player.getInventory().addItem(new ItemStack(material, ProgressMath.CRAFT_COST));
+            player.sendMessage(Component.text("Free an inventory slot first.", NamedTextColor.RED));
+            return false;
         }
-        if (cobble) {
-            profile.enchantedCobble++;
-        } else {
-            profile.enchantedOak++;
-        }
-        plugin.profiles().save(profile);
         plugin.sidebar().show(player, profile);
         plugin.hold().touch(player, true);
+        boolean isCobble = cobble;
+        java.util.function.Consumer<Boolean> counted = ok -> {
+            if (!ok) {
+                return;
+            }
+            Profile p = plugin.profiles().get(player.getUniqueId());
+            if (isCobble) {
+                p.enchantedCobble++;
+            } else {
+                p.enchantedOak++;
+            }
+            plugin.profiles().save(p);
+        };
         if (plugin.wordMode()) {
-            plugin.words().commitLocal(player);
+            plugin.words().commitLocal(player, counted);
+        } else {
+            counted.accept(true);
         }
         player.sendMessage(Component.text(
                 cobble ? "Compressed 160 cobblestone into Enchanted Cobblestone." : "Compressed 160 oak logs into an Enchanted Oak Log.",

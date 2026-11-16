@@ -50,9 +50,8 @@ decremented by what actually moved), SkyWord2 / Attested contracts (bag writes a
 can never hold an item; exported keys need a server EIP-712 attestation bound to player, contract, chain, a one-shot
 nonce and a deadline, so attestations cannot be replayed).
 
-Residual (not fixed, needs a bigger change): if a container write fails for a reason other than gas after its retries
-(RPC error, or a player with an exported key draining the purse between the check and the send), the container is
-still not rolled back. A full fix snapshots the open container at the first trusted click and restores it on rollback.
+Residual of this round (fixed in round 5): if a container write failed for a reason other than gas after its retries,
+the container was still not rolled back. Round 5 snapshots the open container at the first trusted click and restores it.
 
 ### Round 4 (auctions, world items, rewards)
 
@@ -67,10 +66,33 @@ dropping items (drops are burned through the bag write, nothing lands in the wor
 islands), quests (one linear step counter, each reward once), co-op join/leave (the player's own data is wiped on
 both), guests (no break/place/containers/drops/armor stands).
 
+### Round 5 (sponsor cap, world rollback, scoring/craft/XP/permissions)
+
+| # | Area | Finding | Severity | Status |
+|---|------|---------|----------|--------|
+| 14 | Gas sponsor (`WalletService.java`) | Booster holders got 0.02 STT from the admin wallet every time the purse was short, with no cap. Exporting the key and moving the float out, then triggering another write, repeated it. | High | Fixed: `cookie.sponsor-daily-cap-stt` (default 0.2) is a rolling 24h cap per purse, persisted in `sponsor-topups.json`. Normal play stays sponsored (one 0.02 float covers a long run of writes). Cap hit is logged and the player is told to `/deposit` or wait 24 hours; `shortOnGas` then waits like a non-Booster. |
+| 15 | Containers / frames / stands (`WordChain.java`, `ItemSync.java`) | Rounds 3–4 made these wait when gas was too low. If the bag write then failed for another reason (RPC after retries, exported-key player emptying the purse between check and send), the bag rolled back while the chest/furnace/hopper/ender chest/frame/stand kept the item (dupe). | High | Fixed: the first interaction of a pending trusted write snapshots that container/frame/stand (and newly placed frames/stands). A full rollback restores the snapshot (ender chest restore is kept for the next login if they left). Success drops the snapshot and does not restore. |
+| 16 | Compression craft (`SkyCommands.java`) | `/craft cobble` and `/craft oak` dropped overflow on the ground, then signed the bag. A failed write put the 160 ingredients back in the bag while the enchanted item stayed on the ground (dupe). | High | Fixed: needs a free slot first; nothing is dropped. The enchanted-item counter increments only after the write lands. |
+| 17 | Crafting table (`CraftGui.java`, `Skills.java`) | Crafting with leftovers in the grid granted Carpentry XP before the bag write. A later failed write rolled the bag back and kept the XP. The custom window also sits next to vanilla `CraftItemEvent` carpentry. | Medium | Fixed: leftover crafts wait for the close/quit write before XP. Vanilla `CraftItemEvent` skips `CraftGui.View`. Forge quest steps (`Market.forge`) wait for the bag write too. |
+| 18 | SkyProfile writes (`SkillChain.java`) | Every 4 s batch with any pending XP sent `applyXp`, so a Booster mining slowly paid (sponsored) gas on a trickle of tiny writes. | Medium | Fixed: local XP is still instant; onchain `applyXp` waits 20 s so neighbouring gains ride in one write (a full 1,000,000 cap entry is sent at once). Sponsor-cap purses wait instead of bypassing the gas check. |
+
+Reviewed with no change needed:
+
+- Event score: `evXp` counts only this player's own collection part (co-op share cannot be funnelled). A profile reset or co-op join/leave bumps `epoch` and `awaitLoad`, so the website takes `max(best closed profile, current)` and never sums them. Shared IP/wallet tags are flagged. Dev-accounts (by name) and `event-excluded-wallets` are marked `dev`/`excluded` and dropped from public standings and prizes. Hub/island resource XP on player-placed blocks is gated by `words/placed.bin` (survives restart).
+- Permissions: `plugin.yml` gives `somnia.admin` (default op) only to `/sbadmin`; the handler also requires that permission or console. Until `/login`, Auth blocks every command except `/register` `/login` `/changepassword` (including `namespace:` prefixes) and hides the rest from tab-complete. `/dev` and `/user` run only for `dev-accounts` after login; the command list hides them from everyone else. Gameplay commands (`/island`, `/craft`, `/bz`, `/ah`, `/exportkey`, `/coop`, …) are open to any logged-in player by design; `/exportkey` needs the password again and `/withdraw` spends only that player's purse.
+
+Residual (not fixed in this pass):
+
+| Item | Note |
+|------|------|
+| `/island reset` has no cooldown | Each reset rebuilds the starter island and refills the starter chest. Skills and collections stay, so the starter cobble/logs can be farmed again for event XP. A cooldown is a gameplay choice (do not change `/island reset` here). |
+| Login lockout also locks the name | 5 wrong passwords lock the name (and IP) for a while. |
+| Clicks on a chest while a write is already in flight | The snapshot is taken at the first click. Extra clicks during `bagBusy` ride the next write; if that next write is the first one that fails, those extra clicks follow the existing 2-tick batch rules. |
+| Crash mid-write | An in-flight trusted write that never gets a receipt leaves the live container as vanilla left it; the next login reloads the bag from chain. Same class as a crash during a block write. |
+
 ### Open items (owner decision)
 
 | Item | Note |
 |------|------|
-| Gas sponsorship for Booster holders has no cap | A Booster holder whose purse is short on gas gets a 0.02 STT float from the admin wallet each time. Withdrawing or exporting the key and moving the float out, then triggering another write, repeats it. A daily cap per purse would stop draining without changing normal play. |
 | `/island reset` has no cooldown | Each reset rebuilds the starter island and refills the starter chest (dirt, grass, cobblestone, water and lava buckets, bone meal). Low value, but repeatable; a cooldown would be a gameplay choice. |
 | Login lockout also locks the name | 5 wrong passwords lock the name (and IP) for a while, which stops brute force but lets anyone lock a known name out for that time. |

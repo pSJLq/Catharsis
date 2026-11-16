@@ -28,6 +28,17 @@ chain:
   gas-limit: 8000000
   max-fee-gwei: 20         # cap; the fee itself follows eth_gasPrice (+ a safety margin)
 
+# Booster Cookie: bought with SOMI on Somnia mainnet from the player's own purse, 4 days of buff per cookie.
+cookie:
+  price-somi: 25
+  mainnet-rpc: "https://api.infra.mainnet.somnia.network/"
+  mainnet-chain-id: 5031
+  receiver: "0x85b7D75cf35efC7E636FbDf3E82C92c6ceB5AC9D"   # where the SOMI goes (donation address)
+  days: 4
+  gate-commands: true        # without the buff, /ah /bz /bank (and their menu buttons) are closed; the hub NPCs always work
+  sponsor-topup-stt: 0.02    # buff holders: the admin wallet tops the purse up by at least this when gas is short
+  sponsor-daily-cap-stt: 0.2 # max sponsored top-ups per purse per rolling 24h (persisted; stops drain if the key is emptied)
+
 # Login with a limbo (Auth). Purse keys are sealed with the player's password (Argon2id + AES-256-GCM).
 auth:
   session-hours: 0         # 0 = /login on every join (sessions by name + IP only once a proxy passes the real IP)

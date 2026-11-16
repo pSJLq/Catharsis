@@ -222,7 +222,11 @@ final class Skills implements Listener {
         if (tenths <= 0) {
             return;
         }
-        if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
+        Profile shortProfile = plugin.profiles().get(player.getUniqueId());
+        if (plugin.wallets().shortOnGas(shortProfile)) {
+            if (plugin.wallets().sponsorCapReached(shortProfile)) {
+                plugin.wallets().tellSponsorCap(shortProfile);
+            }
             return;
         }
         if (tenths % 10 == 0) {
@@ -255,6 +259,9 @@ final class Skills implements Listener {
         }
         Profile profile = plugin.profiles().get(player.getUniqueId());
         if (plugin.wallets().shortOnGas(profile)) {
+            if (plugin.wallets().sponsorCapReached(profile)) {
+                plugin.wallets().tellSponsorCap(profile);
+            }
             return;
         }
         int before;
@@ -371,6 +378,11 @@ final class Skills implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onCraft(CraftItemEvent event) {
+        // CraftGui grants carpentry itself after the bag write; the custom window is not a vanilla CraftItemEvent path,
+        // but skip it anyway so a leftover vanilla event cannot double-grant.
+        if (event.getView().getTopInventory().getHolder() instanceof CraftGui.View) {
+            return;
+        }
         if (event.getWhoClicked() instanceof Player player && event.getRecipe() != null) {
             add(player, Skill.CARPENTRY, 2L * Math.max(1, event.getRecipe().getResult().getAmount()));
             if (event.getRecipe().getResult().getType().name().endsWith("_PICKAXE")) {

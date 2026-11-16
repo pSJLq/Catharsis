@@ -10,6 +10,9 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.Container;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.ItemFrame;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
@@ -30,6 +33,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.CraftingInventory;
+import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -82,7 +86,12 @@ final class WordChain implements Listener {
     private final Map<UUID, Seat> seats = new ConcurrentHashMap<>();
     private final Set<Long> placed = ConcurrentHashMap.newKeySet();
     private final Set<UUID> painting = ConcurrentHashMap.newKeySet();
+    /** Ender-chest snapshots to restore on the next login if the write rolled back while the player was offline. */
+    private final Map<UUID, ItemStack[]> pendingEnder = new ConcurrentHashMap<>();
     private final String forgedTopic;
+    private static final EquipmentSlot[] STAND_SLOTS = {
+            EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET, EquipmentSlot.HAND, EquipmentSlot.OFF_HAND
+    };
 
     WordChain(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
@@ -96,7 +105,52 @@ final class WordChain implements Listener {
         )));
     }
 
+    /**
+     * Blocks players placed on islands give no Skill XP or collection when broken. The set used to live only in
+     * memory, so after every restart placed blocks counted as natural ones (place, wait for a restart, break: free
+     * XP and event score). It is kept in words/placed.bin now: loaded at start, saved every 5 minutes and at stop.
+     */
+    private java.io.File placedFile() {
+        return new java.io.File(plugin.getDataFolder(), "words/placed.bin");
+    }
+
+    private void loadPlaced() {
+        java.io.File file = placedFile();
+        if (!file.isFile()) {
+            return;
+        }
+        try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(new java.io.FileInputStream(file)))) {
+            int n = in.readInt();
+            for (int i = 0; i < n; i++) {
+                placed.add(in.readLong());
+            }
+            plugin.getLogger().info("Placed blocks loaded: " + n);
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Could not read " + file + ": " + exception.getMessage());
+        }
+    }
+
+    private void savePlaced() {
+        long[] keys = placed.stream().mapToLong(Long::longValue).toArray();
+        java.io.File file = placedFile();
+        java.io.File tmp = new java.io.File(file.getPath() + ".tmp");
+        try {
+            file.getParentFile().mkdirs();
+            try (java.io.DataOutputStream out = new java.io.DataOutputStream(new java.io.BufferedOutputStream(new java.io.FileOutputStream(tmp)))) {
+                out.writeInt(keys.length);
+                for (long k : keys) {
+                    out.writeLong(k);
+                }
+            }
+            java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Could not save " + file + ": " + exception.getMessage());
+        }
+    }
+
     void start() {
+        loadPlaced();
+        plugin.getServer().getScheduler().runTaskTimerAsynchronously(plugin, this::savePlaced, 20L * 300, 20L * 300);
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::tickMana, 20L, 20L);
         NamespacedKey key = recipeKey();
         if (Bukkit.getRecipe(key) == null) {
@@ -107,6 +161,7 @@ final class WordChain implements Listener {
     }
 
     void stop() {
+        savePlaced();
         Bukkit.removeRecipe(recipeKey());
         // A hub break still waiting for its signature holds a bedrock/sprout placeholder: put the resource back
         // so the hub never keeps a stray placeholder outside the regen timers.
@@ -279,7 +334,7 @@ final class WordChain implements Listener {
         }
         if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
             event.setCancelled(true);
-            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+            tellGas(player);
             return;
         }
         List<ItemStack> drops = new ArrayList<>(block.getDrops(player.getInventory().getItemInMainHand(), player));
@@ -409,7 +464,7 @@ final class WordChain implements Listener {
         }
         if (plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()))) {
             event.setCancelled(true);
-            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+            tellGas(player);
             return;
         }
         BigInteger packed = pack(hand);
@@ -613,32 +668,48 @@ final class WordChain implements Listener {
     /**
      * Moves between the bag and a chest, furnace, hopper or ender chest are trusted bag writes. If that write cannot
      * be paid, the bag goes back to its last signed state but the container keeps what it got (a dupe), so with too
-     * little gas these clicks wait, like block breaks and places do.
+     * little gas these clicks wait, like block breaks and places do. The first click of a pending write also snapshots
+     * the container so a later non-gas failure can put it back.
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onContainerClick(InventoryClickEvent event) {
-        if (event.getWhoClicked() instanceof Player player && containerGasBlocked(player, event.getView().getTopInventory())) {
-            event.setCancelled(true);
-            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
         }
+        Inventory top = event.getView().getTopInventory();
+        if (containerGasBlocked(player, top)) {
+            event.setCancelled(true);
+            tellGas(player);
+            return;
+        }
+        rememberContainer(player, top);
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onContainerDrag(InventoryDragEvent event) {
-        if (event.getWhoClicked() instanceof Player player && containerGasBlocked(player, event.getView().getTopInventory())) {
-            event.setCancelled(true);
-            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
         }
+        Inventory top = event.getView().getTopInventory();
+        if (containerGasBlocked(player, top)) {
+            event.setCancelled(true);
+            tellGas(player);
+            return;
+        }
+        rememberContainer(player, top);
     }
 
-    private boolean containerGasBlocked(Player player, Inventory top) {
+    private boolean worldContainer(Player player, Inventory top) {
         if (top == null || top.getHolder() instanceof Menu || plugin.hold().offchain(player)) {
             return false;
         }
         InventoryType type = top.getType();
-        boolean container = type == InventoryType.ENDER_CHEST
+        return type == InventoryType.ENDER_CHEST
                 || (top.getLocation() != null && type != InventoryType.CRAFTING && type != InventoryType.WORKBENCH && type != InventoryType.PLAYER);
-        if (!container) {
+    }
+
+    private boolean containerGasBlocked(Player player, Inventory top) {
+        if (!worldContainer(player, top)) {
             return false;
         }
         Seat seat = seats.get(player.getUniqueId());
@@ -908,6 +979,7 @@ final class WordChain implements Listener {
             if (!breaks.isEmpty() || !places.isEmpty() || !drops.isEmpty()) {
                 finishLayout(player.getUniqueId(), target, List.of(), 0, null, breaks, places, drops, true);
             }
+            dropSnaps(seat);
             seat.trustFails = 0;
             resolveHooks(seat, true);
             return;
@@ -1099,6 +1171,9 @@ final class WordChain implements Listener {
                 for (PendingPlace pending : places) {
                     restoreBlock(pending.location, pending.replaced);
                 }
+                restoreSnaps(seat, id);
+            } else {
+                dropSnaps(seat);
             }
             boolean wiping = seat.clearing;
             seat.clearing = false;
@@ -1107,9 +1182,7 @@ final class WordChain implements Listener {
                 tell(player, wiping
                         ? "The purse could not clear the old bag. Rejoin when it can pay the gas."
                         : noGas(error)
-                        ? (breaks.isEmpty() && places.isEmpty()
-                        ? "Not enough STT for gas, use /deposit. Your items are safe; the bag layout will be signed on the next change."
-                        : "Not enough STT for gas, use /deposit. The block was put back.")
+                        ? gasFailMessage(id, breaks.isEmpty() && places.isEmpty())
                         : "Could not sign that inventory change: " + blame(error) + " Your bag is back to the last signed state.", NamedTextColor.RED);
             }
             if (seat.again || seat.trustLocal || seat.trusted != null || !seat.breaks.isEmpty()) {
@@ -1120,6 +1193,7 @@ final class WordChain implements Listener {
             return;
         }
         System.arraycopy(target, 0, seat.words, 0, BAG);
+        dropSnaps(seat);
         if (player != null && !plugin.hold().offchain(player) && !seat.trustLocal) {
             show(player, seat);
         }
@@ -1382,6 +1456,10 @@ final class WordChain implements Listener {
         seat.combat = combat == null ? ZERO : combat;
         seat.loaded = true;
         seat.loginTries = 0;
+        ItemStack[] ender = pendingEnder.remove(player.getUniqueId());
+        if (ender != null) {
+            player.getEnderChest().setContents(ender);
+        }
         boolean pendingWorld = !seat.breaks.isEmpty() || !seat.places.isEmpty() || !seat.drops.isEmpty();
         if (!seat.bagBusy && !pendingWorld) {
             seat.held.clear();
@@ -2342,6 +2420,222 @@ final class WordChain implements Listener {
         player.sendMessage(Component.text(text, color));
     }
 
+    private void tellGas(Player player) {
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        if (plugin.wallets().sponsorCapReached(profile)) {
+            tell(player, WalletService.sponsorCapMessage(), NamedTextColor.RED);
+        } else {
+            tell(player, "Not enough STT for gas, use /deposit.", NamedTextColor.RED);
+        }
+    }
+
+    private String gasFailMessage(UUID id, boolean bagOnly) {
+        Profile profile = plugin.profiles().get(id);
+        if (plugin.wallets().sponsorCapReached(profile)) {
+            return bagOnly
+                    ? WalletService.sponsorCapMessage() + " Your items are safe; the bag layout will be signed on the next change."
+                    : WalletService.sponsorCapMessage() + " The block was put back.";
+        }
+        return bagOnly
+                ? "Not enough STT for gas, use /deposit. Your items are safe; the bag layout will be signed on the next change."
+                : "Not enough STT for gas, use /deposit. The block was put back.";
+    }
+
+    void rememberContainer(Player player, Inventory top) {
+        if (!worldContainer(player, top)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        if (top.getType() == InventoryType.ENDER_CHEST) {
+            rememberSnap(seat, WorldSnap.ender(player.getUniqueId(), top.getContents()));
+            return;
+        }
+        Location location = top.getLocation();
+        if (location == null) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.container(location, top.getContents()));
+    }
+
+    void rememberFrame(Player player, ItemFrame frame) {
+        if (frame == null || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.frame(frame));
+    }
+
+    void rememberStand(Player player, ArmorStand stand) {
+        if (stand == null || !stand.getScoreboardTags().isEmpty() || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.stand(stand));
+    }
+
+    void rememberSpawned(Player player, Entity entity) {
+        if (entity == null || plugin.hold().offchain(player)) {
+            return;
+        }
+        if (entity instanceof ArmorStand stand && !stand.getScoreboardTags().isEmpty()) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.spawned(entity));
+    }
+
+    private void rememberSnap(Seat seat, WorldSnap snap) {
+        if (snap == null) {
+            return;
+        }
+        for (WorldSnap have : seat.snaps) {
+            if (have.key.equals(snap.key)) {
+                return;
+            }
+        }
+        seat.snaps.add(snap);
+    }
+
+    private void dropSnaps(Seat seat) {
+        seat.snaps.clear();
+    }
+
+    private void restoreSnaps(Seat seat, UUID playerId) {
+        List<WorldSnap> snaps = new ArrayList<>(seat.snaps);
+        seat.snaps.clear();
+        snaps.sort(java.util.Comparator.comparingInt(s -> s.kind));
+        for (WorldSnap snap : snaps) {
+            try {
+                snap.restore(this, playerId);
+            } catch (RuntimeException exception) {
+                plugin.getLogger().warning("Could not restore world snapshot " + snap.key + ": " + exception.getMessage());
+            }
+        }
+    }
+
+    private static ItemStack[] cloneContents(ItemStack[] in) {
+        ItemStack[] out = new ItemStack[in == null ? 0 : in.length];
+        for (int i = 0; i < out.length; i++) {
+            ItemStack stack = in[i];
+            out[i] = stack == null || stack.getType().isAir() ? null : stack.clone();
+        }
+        return out;
+    }
+
+    private static final class WorldSnap {
+        static final int CONTAINER = 0;
+        static final int ENDER = 1;
+        static final int FRAME = 2;
+        static final int STAND = 3;
+        static final int SPAWNED = 4;
+        final int kind;
+        final String key;
+        final Location location;
+        final UUID entity;
+        final UUID owner;
+        final ItemStack[] items;
+
+        private WorldSnap(int kind, String key, Location location, UUID entity, UUID owner, ItemStack[] items) {
+            this.kind = kind;
+            this.key = key;
+            this.location = location;
+            this.entity = entity;
+            this.owner = owner;
+            this.items = items;
+        }
+
+        static WorldSnap container(Location location, ItemStack[] contents) {
+            Location at = location.clone();
+            return new WorldSnap(CONTAINER, "c:" + at.getWorld().getName() + ":" + at.getBlockX() + ":" + at.getBlockY() + ":" + at.getBlockZ(),
+                    at, null, null, cloneContents(contents));
+        }
+
+        static WorldSnap ender(UUID owner, ItemStack[] contents) {
+            return new WorldSnap(ENDER, "e:" + owner, null, null, owner, cloneContents(contents));
+        }
+
+        static WorldSnap frame(ItemFrame frame) {
+            ItemStack item = frame.getItem();
+            return new WorldSnap(FRAME, "f:" + frame.getUniqueId(), frame.getLocation().clone(), frame.getUniqueId(), null,
+                    new ItemStack[]{item == null || item.getType().isAir() ? null : item.clone()});
+        }
+
+        static WorldSnap stand(ArmorStand stand) {
+            EntityEquipment eq = stand.getEquipment();
+            ItemStack[] items = new ItemStack[STAND_SLOTS.length];
+            if (eq != null) {
+                for (int i = 0; i < STAND_SLOTS.length; i++) {
+                    ItemStack stack = eq.getItem(STAND_SLOTS[i]);
+                    items[i] = stack == null || stack.getType().isAir() ? null : stack.clone();
+                }
+            }
+            return new WorldSnap(STAND, "s:" + stand.getUniqueId(), stand.getLocation().clone(), stand.getUniqueId(), null, items);
+        }
+
+        static WorldSnap spawned(Entity entity) {
+            return new WorldSnap(SPAWNED, "n:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
+        }
+
+        void restore(WordChain words, UUID playerId) {
+            if (kind == CONTAINER && location != null && location.getWorld() != null) {
+                if (!(location.getBlock().getState() instanceof Container container)) {
+                    return;
+                }
+                Inventory inv = container.getInventory();
+                if (items != null && inv.getSize() == items.length) {
+                    inv.setContents(cloneContents(items));
+                }
+                return;
+            }
+            if (kind == ENDER && items != null) {
+                UUID who = owner != null ? owner : playerId;
+                Player online = who == null ? null : words.plugin.getServer().getPlayer(who);
+                if (online != null && online.isOnline()) {
+                    if (online.getEnderChest().getSize() == items.length) {
+                        online.getEnderChest().setContents(cloneContents(items));
+                    }
+                } else if (who != null) {
+                    words.pendingEnder.put(who, cloneContents(items));
+                }
+                return;
+            }
+            if (kind == FRAME && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof ItemFrame frame) {
+                    frame.setItem(items != null && items.length > 0 ? items[0] : null, false);
+                }
+                return;
+            }
+            if (kind == STAND && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof ArmorStand stand && stand.getEquipment() != null && items != null) {
+                    for (int i = 0; i < STAND_SLOTS.length && i < items.length; i++) {
+                        stand.getEquipment().setItem(STAND_SLOTS[i], items[i] == null ? null : items[i].clone());
+                    }
+                }
+                return;
+            }
+            if (kind == SPAWNED && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found != null && (found instanceof ItemFrame || found instanceof ArmorStand)) {
+                    found.remove();
+                }
+            }
+        }
+    }
+
     /** The purse cannot pay the gas (WalletService precheck or the node's insufficient-funds error). */
     static boolean noGas(Exception exception) {
         String m = exception == null || exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
@@ -2385,6 +2679,8 @@ final class WordChain implements Listener {
         BigInteger[] trusted;
         boolean trustLocal;
         int trustFails;
+        /** World inventories/entities snapshotted at the first interaction of the pending trusted write. */
+        final List<WorldSnap> snaps = new ArrayList<>();
         /** Callbacks waiting for the next trusted write, and the ones riding the write in flight. */
         final List<java.util.function.Consumer<Boolean>> hooks = new ArrayList<>();
         List<java.util.function.Consumer<Boolean>> flying;

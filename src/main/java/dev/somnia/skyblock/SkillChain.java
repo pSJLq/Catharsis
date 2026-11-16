@@ -25,8 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>SkyBlock XP / Level is computed by the contract from that data (sbXpOf / levelOf); the game uses the same
  *       formula on the chain values plus the not yet confirmed queue.</li>
  * </ul>
- * Every gain is queued in Profile.pendingXp / pendingCol and sent in the 4 s batch, signed by the player's own purse
- * (a Booster sponsors gas as before). Pending is only cleared after receipt status 1. A player who leaves a co-op keeps
+ * Every gain is queued in Profile.pendingXp / pendingCol and flushed on the 4 s timer, signed by the player's own purse
+ * (a Booster sponsors gas as before, under the daily cap). Neighbouring gains wait 20 s so they ride in one write.
+ * Pending is only cleared after receipt status 1. A player who leaves a co-op keeps
  * their record on the old island and starts from zero on the next one. Skill ids: 0 mining, 1 foraging, 2 farming,
  * 3 combat, 4 fishing, 5 enchanting, 6 alchemy, 7 taming, 8 carpentry. Collection id = index in Collects.ENTRIES.
  */
@@ -47,6 +48,9 @@ final class SkillChain implements Listener {
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> retryAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> hinted = new ConcurrentHashMap<>();
+    /** Last successful applyXp submit, so sponsored gas is not spent on a 4 s trickle of tiny batches. */
+    private final Map<UUID, Long> lastFlushAt = new ConcurrentHashMap<>();
+    private static final long FLUSH_GAP_MS = 20_000L;
     /** Island deed id -> shared collection counters as last read or confirmed onchain. */
     private final Map<Long, long[]> islandCols = new ConcurrentHashMap<>();
 
@@ -353,6 +357,7 @@ final class SkillChain implements Listener {
         loaded.remove(id);
         retryAt.remove(id);
         hinted.remove(id);
+        lastFlushAt.remove(id);
     }
 
     void load(Player player) {
@@ -495,8 +500,7 @@ final class SkillChain implements Listener {
                     return;
                 }
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if ((plugin.cookies() == null || !plugin.cookies().active(profile))
-                        && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
+                if (balance.compareTo(plugin.wallets().gasFeeCap()) < 0 && !plugin.wallets().canSponsor(profile)) {
                     throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
                 boolean whole = profile.skillsResetWhole;
@@ -582,6 +586,17 @@ final class SkillChain implements Listener {
         if (ns + nc == 0 && task == 0) {
             return;
         }
+        boolean full = false;
+        for (int i = 0; i < ns; i++) {
+            full |= amounts[i] >= MAX_AMOUNT;
+        }
+        for (int i = 0; i < nc; i++) {
+            full |= colAmts[i] >= MAX_AMOUNT;
+        }
+        Long last = lastFlushAt.get(profile.uuid);
+        if (!full && last != null && System.currentTimeMillis() - last < FLUSH_GAP_MS) {
+            return;
+        }
         if (island <= 0) {
             loaded.remove(profile.uuid);
             return;
@@ -602,11 +617,11 @@ final class SkillChain implements Listener {
                     return;
                 }
                 BigInteger balance = plugin.wallets().balanceWei(profile.wallet);
-                if ((plugin.cookies() == null || !plugin.cookies().active(profile))
-                        && balance.compareTo(plugin.wallets().gasFeeCap()) < 0) {
+                if (balance.compareTo(plugin.wallets().gasFeeCap()) < 0 && !plugin.wallets().canSponsor(profile)) {
                     throw new IllegalStateException("Purse has insufficient STT for gas.");
                 }
                 String hash = plugin.wallets().submitTo(profile, contract(), WalletService.applyXp(island, s, sa, c, ca, t), BigInteger.ZERO);
+                lastFlushAt.put(id, System.currentTimeMillis());
                 long[] txXp = new long[SKILLS];
                 long[] txCol = new long[COLLECTIONS];
                 for (int i = 0; i < s.length; i++) {
@@ -709,6 +724,12 @@ final class SkillChain implements Listener {
             return;
         }
         hinted.put(player.getUniqueId(), now);
+        Profile profile = plugin.profiles().get(player.getUniqueId());
+        if (plugin.wallets().sponsorCapReached(profile)) {
+            player.sendMessage(Component.text(WalletService.sponsorCapMessage(), NamedTextColor.YELLOW));
+            player.sendMessage(Component.text("Your queued skill XP is saved and is sent as soon as you can pay gas.", NamedTextColor.GRAY));
+            return;
+        }
         player.sendMessage(Component.text("Your skill XP is saved and waiting to go onchain, but your game purse has no STT for gas.", NamedTextColor.YELLOW));
         player.sendMessage(Component.text("Top up with /deposit. Your queued progress is sent as soon as STT arrives.", NamedTextColor.GRAY));
     }

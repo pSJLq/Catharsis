@@ -14,7 +14,9 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockFertilizeEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.EntityPlaceEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.event.hanging.HangingPlaceEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
@@ -68,43 +70,95 @@ final class ItemSync implements Listener {
      * Item frames and armor stands take items out of the bag into the world (and give them back). If that bag write
      * cannot be paid, the bag goes back to its last signed state while the frame or stand keeps the item (a dupe),
      * so with too little gas these uses wait, like block breaks and places do. Picking items up waits too, so a
-     * pickup is not taken away again by a rolled-back write.
+     * pickup is not taken away again by a rolled-back write. The first interaction of a pending write also snapshots
+     * the frame or stand so a later non-gas failure can put it back.
      */
     private boolean gasBlocked(Player player) {
         return chainBag(player) && plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()));
     }
 
     private void tellGas(Player player) {
-        player.sendActionBar(Component.text("Not enough STT for gas, use /deposit.", NamedTextColor.RED));
+        String text = plugin.wallets().sponsorCapReached(plugin.profiles().get(player.getUniqueId()))
+                ? WalletService.sponsorCapMessage()
+                : "Not enough STT for gas, use /deposit.";
+        player.sendActionBar(Component.text(text, NamedTextColor.RED));
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onFrameOrStand(PlayerInteractEntityEvent event) {
         org.bukkit.entity.Entity target = event.getRightClicked();
-        // Only a player-placed frame or stand (plugin stands such as minions and NPC labels carry scoreboard tags),
-        // and only with an item in hand (that is the move from the bag into the world).
-        org.bukkit.inventory.ItemStack hand = event.getPlayer().getInventory().getItem(event.getHand());
+        // Player-placed frames, and stands without plugin tags (minions and NPC labels carry tags).
         boolean world = target instanceof org.bukkit.entity.ItemFrame
                 || (target instanceof org.bukkit.entity.ArmorStand && target.getScoreboardTags().isEmpty());
-        if (world && hand != null && !hand.getType().isAir() && gasBlocked(event.getPlayer())) {
+        if (!world) {
+            return;
+        }
+        Player player = event.getPlayer();
+        org.bukkit.inventory.ItemStack hand = player.getInventory().getItem(event.getHand());
+        if (hand != null && !hand.getType().isAir() && gasBlocked(player)) {
             event.setCancelled(true);
-            tellGas(event.getPlayer());
+            tellGas(player);
+            return;
+        }
+        if (plugin.words() == null || !chainBag(player)) {
+            return;
+        }
+        if (target instanceof org.bukkit.entity.ItemFrame frame) {
+            plugin.words().rememberFrame(player, frame);
+        } else if (target instanceof org.bukkit.entity.ArmorStand stand) {
+            plugin.words().rememberStand(player, stand);
         }
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onStandGas(PlayerArmorStandManipulateEvent event) {
-        if (event.getRightClicked().getScoreboardTags().isEmpty() && !event.getPlayerItem().getType().isAir() && gasBlocked(event.getPlayer())) {
+        Player player = event.getPlayer();
+        if (!event.getRightClicked().getScoreboardTags().isEmpty()) {
+            return;
+        }
+        if (!event.getPlayerItem().getType().isAir() && gasBlocked(player)) {
+            event.setCancelled(true);
+            tellGas(player);
+            return;
+        }
+        if (plugin.words() != null && chainBag(player)) {
+            plugin.words().rememberStand(player, event.getRightClicked());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onHangingPlace(HangingPlaceEvent event) {
+        if (event.getPlayer() != null && gasBlocked(event.getPlayer())) {
             event.setCancelled(true);
             tellGas(event.getPlayer());
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHangingPlaced(HangingPlaceEvent event) {
+        if (event.getPlayer() != null && plugin.words() != null && chainBag(event.getPlayer()) && event.getEntity() != null) {
+            plugin.words().rememberSpawned(event.getPlayer(), event.getEntity());
+            sync(event.getPlayer());
+        }
+    }
+
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
-    public void onHangingPlace(org.bukkit.event.hanging.HangingPlaceEvent event) {
-        if (event.getPlayer() != null && gasBlocked(event.getPlayer())) {
+    public void onEntityPlace(EntityPlaceEvent event) {
+        if (event.getPlayer() != null && gasBlocked(event.getPlayer())
+                && (event.getEntity() instanceof org.bukkit.entity.ItemFrame
+                || (event.getEntity() instanceof org.bukkit.entity.ArmorStand && event.getEntity().getScoreboardTags().isEmpty()))) {
             event.setCancelled(true);
             tellGas(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityPlaced(EntityPlaceEvent event) {
+        if (event.getPlayer() != null && plugin.words() != null && chainBag(event.getPlayer()) && event.getEntity() != null
+                && (event.getEntity() instanceof org.bukkit.entity.ItemFrame
+                || event.getEntity() instanceof org.bukkit.entity.ArmorStand)) {
+            plugin.words().rememberSpawned(event.getPlayer(), event.getEntity());
+            sync(event.getPlayer());
         }
     }
 
