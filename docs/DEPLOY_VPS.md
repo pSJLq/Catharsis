@@ -228,3 +228,16 @@ can call `setBaseURI("https://<domain>/api/island/")` once so wallets and explor
 Same rule as on Windows: back up, `control/warn` and wait 60 s if anyone is online, put the new jar into
 `plugins/update`, then one `control/stop`. systemd starts Paper again after 10 seconds (`Restart=always`), like
 `keep.ps1`. `sudo systemctl stop catharsis-paper` stops it for good (until `start`).
+
+## 11. Notes from the first move (HostHatch London, Ubuntu 24.04, November 2026)
+
+- Ubuntu 24.04 has `openjdk-25-jre-headless` in its updates, so no Temurin repo was needed.
+- Windows `tar` stops at the first locked file (world `.mca` files, `eagler_skins_cache.db`), so a copy while Paper
+  runs is incomplete. Only `server/libraries` and the plugin jars can be sent ahead; pack the rest after the stop.
+- The `catharsis` user cannot read archives in `/root`; extract with `sudo -u catharsis tar -xzf - < /root/file.tgz`.
+- `caddy validate` run as root creates `/var/log/caddy/catharsis.log` owned by root and the reload then fails;
+  `chown caddy:caddy /var/log/caddy/catharsis.log` fixes it.
+- Before DNS works, add a plain `http://VPS_IP { ... }` block with the same handlers and set
+  `PUBLIC_URL=http://VPS_IP` and `JOIN_URL=ws://VPS_IP` in `site.env`; switch both to the domain once the
+  certificate is issued. Some local HTTP proxies drop the WebSocket upgrade on plain `ws://`, `wss://` is not affected.
+- On the PC, `server\keep.off` stops `keep.ps1`, and `CatharsisKeep.vbs` in the Startup folder is the only autostart.

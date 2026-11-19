@@ -47,7 +47,7 @@ play.example.com {
 	}
 }
 
-# Optional second name that redirects to the main one (needs its own DNS record):
-# www.play.example.com {
-# 	redir https://play.example.com{uri} permanent
-# }
+# Second name that redirects to the main one (needs its own DNS record):
+www.play.example.com {
+	redir https://play.example.com{uri} permanent
+}
