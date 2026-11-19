@@ -1003,6 +1003,46 @@ final class WordChain implements Listener {
         snap.withheld.addAll(held);
     }
 
+    /**
+     * A honey bottle that does not fit, and sweet berries, spawn as world items. The block snapshot
+     * is the full hive or bush. A failed write puts that block back, so the ground item would be a
+     * second copy. Hold the drop and spawn it only if the write lands.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapHarvestDrop(org.bukkit.event.entity.ItemSpawnEvent event) {
+        ItemStack stack = event.getEntity().getItemStack();
+        if (stack == null || !heldHarvest(stack.getType())) {
+            return;
+        }
+        WorldSnap snap = blockSnapNear(event.getLocation());
+        if (snap == null) {
+            return;
+        }
+        snap.withheld.add(stack.clone());
+        event.setCancelled(true);
+    }
+
+    private static boolean heldHarvest(Material type) {
+        return type == Material.HONEY_BOTTLE
+                || type == Material.HONEYCOMB
+                || type == Material.SWEET_BERRIES
+                || type == Material.GLOW_BERRIES
+                || type == Material.PUMPKIN_SEEDS;
+    }
+
+    /** The drop sits in the snapshotted block, or in the block just above it. */
+    private WorldSnap blockSnapNear(Location loc) {
+        if (loc == null || loc.getWorld() == null) {
+            return null;
+        }
+        Block block = loc.getBlock();
+        WorldSnap snap = blockSnap(block);
+        if (snap != null) {
+            return snap;
+        }
+        return blockSnap(block.getRelative(BlockFace.DOWN));
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapBucketEmpty(PlayerBucketEmptyEvent event) {
         if (!lockedBlock(event.getBlock())) {
