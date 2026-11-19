@@ -6,9 +6,13 @@ import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
 import org.bukkit.GameMode;
 import org.bukkit.Sound;
+import org.bukkit.entity.AreaEffectCloud;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EvokerFangs;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
+import org.bukkit.entity.TNTPrimed;
+import org.bukkit.entity.Tameable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -151,6 +155,33 @@ final class Stats implements Listener {
         return hp.getOrDefault(player.getUniqueId(), (double) sheet(player).health());
     }
 
+    /**
+     * The player a hit belongs to: the shooter of a projectile, the owner of a lingering cloud, a tamed pet, lit TNT
+     * or evoker fangs. Used so PvP and guest rules see the person, not the wolf or the cloud.
+     */
+    static Entity credit(Entity entity) {
+        Entity current = entity;
+        for (int step = 0; step < 4 && current != null; step++) {
+            Entity next = null;
+            if (current instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter) {
+                next = shooter;
+            } else if (current instanceof AreaEffectCloud cloud && cloud.getSource() instanceof Entity source) {
+                next = source;
+            } else if (current instanceof TNTPrimed tnt && tnt.getSource() instanceof Entity source) {
+                next = source;
+            } else if (current instanceof Tameable tame && tame.getOwner() instanceof Entity owner) {
+                next = owner;
+            } else if (current instanceof EvokerFangs fangs && fangs.getOwner() instanceof Entity owner) {
+                next = owner;
+            }
+            if (next == null || next == current) {
+                return current;
+            }
+            current = next;
+        }
+        return current;
+    }
+
     void heal(Player player) {
         hp.put(player.getUniqueId(), (double) sheet(player).health());
         paint(player);
@@ -175,13 +206,9 @@ final class Stats implements Listener {
         String source = cause.name().toLowerCase().replace('_', ' ');
         Sheet sheet = sheet(player);
         if (event instanceof EntityDamageByEntityEvent by) {
-            Entity damager = by.getDamager();
-            Entity origin = damager;
-            if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter) {
-                origin = shooter;
-            }
+            Entity origin = credit(by.getDamager());
             if (origin instanceof Player) {
-                // No PvP in any world. Combat is PvE only.
+                // No PvP in any world. Combat is PvE only. Pets, lingering clouds and lit TNT count as their owner.
                 event.setCancelled(true);
                 return;
             }

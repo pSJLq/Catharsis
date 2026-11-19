@@ -347,13 +347,44 @@ final class Visits implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
-        Player damager = damager(event);
+        org.bukkit.entity.Entity raw = event.getDamager();
+        Player damager = actor(raw);
         if (damager == null) {
             return;
         }
         if (!mayEdit(damager, event.getEntity().getLocation())) {
             event.setCancelled(true);
-            deny(damager);
+            // A tamed wolf ticks this every hit. A punch or an arrow still gets the guest line.
+            if (raw instanceof Player || raw instanceof org.bukkit.entity.Projectile) {
+                deny(damager);
+            }
+        }
+    }
+
+    /** Bone meal on a host's crops. Cancelling the click is not always enough for the fertilize event. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onFertilize(org.bukkit.event.block.BlockFertilizeEvent event) {
+        Player player = event.getPlayer();
+        if (player != null && !mayEdit(player, event.getBlock().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onLectern(org.bukkit.event.player.PlayerTakeLecternBookEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getLectern().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    /** A thrown egg hatches a chicken the guest does not own. The egg is still used. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onEgg(org.bukkit.event.player.PlayerEggThrowEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getEgg().getLocation())) {
+            event.setHatching(false);
+            deny(event.getPlayer());
         }
     }
 
@@ -491,18 +522,8 @@ final class Visits implements Listener {
         end(event.getPlayer());
     }
 
-    private static Player damager(EntityDamageByEntityEvent event) {
-        return actor(event.getDamager());
-    }
-
     private static Player actor(org.bukkit.entity.Entity entity) {
-        if (entity instanceof Player player) {
-            return player;
-        }
-        if (entity instanceof org.bukkit.entity.Projectile projectile
-                && projectile.getShooter() instanceof Player player) {
-            return player;
-        }
-        return null;
+        org.bukkit.entity.Entity credit = Stats.credit(entity);
+        return credit instanceof Player player ? player : null;
     }
 }
