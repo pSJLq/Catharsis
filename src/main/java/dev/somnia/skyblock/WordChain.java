@@ -22,6 +22,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -33,6 +35,7 @@ import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.Inventory;
@@ -760,6 +763,31 @@ final class WordChain implements Listener {
         }
     }
 
+    /**
+     * Breaking a snapshotted frame, stand, boat, cart or chested animal drops the item and the rollback puts it
+     * back as well. Hold the entity still until the write lands or is fully rolled back.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapHurt(EntityDamageEvent event) {
+        if (snapLocksEntity(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapVehicleDestroy(VehicleDestroyEvent event) {
+        if (snapLocksEntity(event.getVehicle())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapHangingBreak(HangingBreakEvent event) {
+        if (snapLocksEntity(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
     private boolean worldContainer(Player player, Inventory top) {
         if (top == null || top.getHolder() instanceof Menu || plugin.hold().offchain(player)) {
             return false;
@@ -841,10 +869,30 @@ final class WordChain implements Listener {
                 continue;
             }
             for (WorldSnap snap : seat.snaps) {
-                if (snap.location == null || snap.location.getWorld() == null || !snap.location.getWorld().equals(loc.getWorld())) {
+                // A chest boat or minecart stores its own inventory. Its feet are not that block.
+                if (snap.entity != null || snap.location == null || snap.location.getWorld() == null
+                        || !snap.location.getWorld().equals(loc.getWorld())) {
                     continue;
                 }
                 if (sameBlock(snap.location, loc) || linkedChest(snap.location, loc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean snapLocksEntity(Entity entity) {
+        if (entity == null || !anySnaps()) {
+            return false;
+        }
+        UUID id = entity.getUniqueId();
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (id.equals(snap.entity)) {
                     return true;
                 }
             }
@@ -859,8 +907,8 @@ final class WordChain implements Listener {
                     && snap.owner != null
                     && snap.owner.equals(holder.getUniqueId());
         }
-        if (snap.entity != null && inventory.getHolder() instanceof Entity entity && snap.entity.equals(entity.getUniqueId())) {
-            return true;
+        if (snap.entity != null) {
+            return inventory.getHolder() instanceof Entity entity && snap.entity.equals(entity.getUniqueId());
         }
         Location loc = inventory.getLocation();
         if (snap.location == null || loc == null || loc.getWorld() == null || snap.location.getWorld() == null
@@ -2652,6 +2700,13 @@ final class WordChain implements Listener {
             rememberSnap(seat, WorldSnap.ender(player.getUniqueId(), top.getContents()));
             return;
         }
+        // Chest boats, chest minecarts and llama/donkey chests are entities. A block snapshot would write
+        // the rollback into whatever chest happens to share that block, or into nothing, and leave the copy.
+        InventoryHolder holder = top.getHolder();
+        if (holder instanceof Entity entity && !(entity instanceof Player)) {
+            rememberSnap(seat, WorldSnap.carrier(entity, top.getContents()));
+            return;
+        }
         Location location = top.getLocation();
         if (location == null) {
             return;
@@ -2784,6 +2839,12 @@ final class WordChain implements Listener {
                     at, null, null, cloneContents(contents));
         }
 
+        /** Entity inventory (chest boat, minecart, llama, donkey, horse). Keyed by the entity, not the block under it. */
+        static WorldSnap carrier(Entity entity, ItemStack[] contents) {
+            return new WorldSnap(CONTAINER, "v:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null,
+                    cloneContents(contents));
+        }
+
         static WorldSnap ender(UUID owner, ItemStack[] contents) {
             return new WorldSnap(ENDER, "e:" + owner, null, null, owner, cloneContents(contents));
         }
@@ -2846,6 +2907,16 @@ final class WordChain implements Listener {
         }
 
         void restore(WordChain words, UUID playerId) {
+            if (kind == CONTAINER && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof InventoryHolder holder && items != null) {
+                    Inventory inv = holder.getInventory();
+                    if (inv.getSize() == items.length) {
+                        inv.setContents(cloneContents(items));
+                    }
+                }
+                return;
+            }
             if (kind == CONTAINER && location != null && location.getWorld() != null) {
                 if (!(location.getBlock().getState() instanceof Container container)) {
                     return;
