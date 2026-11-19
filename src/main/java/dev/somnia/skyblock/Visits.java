@@ -12,8 +12,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
@@ -303,6 +305,33 @@ final class Visits implements Listener {
         if (event.getAction() != Action.PHYSICAL) {
             deny(event.getPlayer());
         }
+    }
+
+    /**
+     * A right-click in the air is not a block edit, so a fire charge still leaves the hand and lights the host's
+     * wood. Flint and steel on a block is already denied above. Spread with no player is left alone.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onIgnite(BlockIgniteEvent event) {
+        Player player = event.getPlayer();
+        if (player != null && !mayEdit(player, event.getBlock().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onProjectile(ProjectileLaunchEvent event) {
+        if (!(event.getEntity().getShooter() instanceof Player player)) {
+            return;
+        }
+        org.bukkit.entity.Entity shot = event.getEntity();
+        boolean lights = shot instanceof org.bukkit.entity.Fireball || shot instanceof org.bukkit.entity.WindCharge;
+        if (!lights || mayEdit(player, player.getLocation())) {
+            return;
+        }
+        event.setCancelled(true);
+        deny(player);
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
