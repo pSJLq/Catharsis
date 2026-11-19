@@ -190,7 +190,9 @@ final class ItemSync implements Listener {
             return;
         }
         event.setCancelled(true);
-        if (event.getCaught() != null) {
+        // CAUGHT_FISH spawns a new item. CAUGHT_ENTITY is a mob, cart, frame or ground item that was already
+        // in the world: cancelling stops the reel, and removing it would delete the Gate minecart or a mob.
+        if (event.getState() == PlayerFishEvent.State.CAUGHT_FISH && event.getCaught() instanceof org.bukkit.entity.Item) {
             event.getCaught().remove();
         }
         tellGas(player);
