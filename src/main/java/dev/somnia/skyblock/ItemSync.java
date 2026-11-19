@@ -142,11 +142,21 @@ final class ItemSync implements Listener {
         }
     }
 
+    /**
+     * Frames, stands, boats, minecarts and crystals leave the bag and exist in the world. Same gas rule as
+     * {@link #onFrameOrStand}: with too little STT the write would roll the bag back while the entity stayed.
+     */
+    private static boolean worldPlaced(org.bukkit.entity.Entity entity) {
+        if (entity instanceof org.bukkit.entity.ItemFrame || entity instanceof org.bukkit.entity.EnderCrystal
+                || entity instanceof org.bukkit.entity.Vehicle) {
+            return true;
+        }
+        return entity instanceof org.bukkit.entity.ArmorStand && entity.getScoreboardTags().isEmpty();
+    }
+
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onEntityPlace(EntityPlaceEvent event) {
-        if (event.getPlayer() != null && gasBlocked(event.getPlayer())
-                && (event.getEntity() instanceof org.bukkit.entity.ItemFrame
-                || (event.getEntity() instanceof org.bukkit.entity.ArmorStand && event.getEntity().getScoreboardTags().isEmpty()))) {
+        if (event.getPlayer() != null && worldPlaced(event.getEntity()) && gasBlocked(event.getPlayer())) {
             event.setCancelled(true);
             tellGas(event.getPlayer());
         }
@@ -154,9 +164,8 @@ final class ItemSync implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityPlaced(EntityPlaceEvent event) {
-        if (event.getPlayer() != null && plugin.words() != null && chainBag(event.getPlayer()) && event.getEntity() != null
-                && (event.getEntity() instanceof org.bukkit.entity.ItemFrame
-                || event.getEntity() instanceof org.bukkit.entity.ArmorStand)) {
+        if (event.getPlayer() != null && plugin.words() != null && chainBag(event.getPlayer())
+                && worldPlaced(event.getEntity())) {
             plugin.words().rememberSpawned(event.getPlayer(), event.getEntity());
             sync(event.getPlayer());
         }
