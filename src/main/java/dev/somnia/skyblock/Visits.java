@@ -5,6 +5,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -305,6 +306,38 @@ final class Visits implements Listener {
         if (event.getAction() != Action.PHYSICAL) {
             deny(event.getPlayer());
         }
+    }
+
+    /**
+     * A right-click in the air never hits the block guard. An ender pearl or chorus fruit then leaves the
+     * island, and a spawn egg leaves a mob on the host's Hearth. The item stays in the hand.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onAirToss(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_AIR) {
+            return;
+        }
+        org.bukkit.inventory.ItemStack item = event.getItem();
+        if (item == null || !airToss(item.getType())) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (mayEdit(player, player.getLocation())) {
+            return;
+        }
+        event.setCancelled(true);
+        event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+        deny(player);
+    }
+
+    private static boolean airToss(Material type) {
+        if (type == null) {
+            return false;
+        }
+        if (type == Material.ENDER_PEARL || type == Material.CHORUS_FRUIT) {
+            return true;
+        }
+        return type.name().endsWith("_SPAWN_EGG");
     }
 
     /**
