@@ -558,33 +558,56 @@ final class WordChain implements Listener {
         if (seat == null || !seat.loaded) {
             return;
         }
+        // Clone first. Swallowing the entity stack must not erase the amount this handler still has to count.
+        ItemStack raw = event.getItemDrop().getItemStack();
+        ItemStack dropped = raw == null ? null : raw.clone();
         int slot = player.getInventory().getHeldItemSlot();
         int[] click = clickDrops.remove(player.getUniqueId());
         if (click != null && click[1] == Bukkit.getCurrentTick()) {
             if (click[0] < 0) {
-                // Dropped from the cursor or from a slot outside the bag: the server puts it back into the inventory
-                // (the drop is cancelled) and the next layout write records where it went. Never touch the held slot.
+                // Cursor, or a slot outside the bag (the 2x2 itself). Put that stack back on the cursor.
+                // Leaving it for the server's cancel-restore uses addItem, which deletes the stack when the bag is full.
+                swallow(event);
+                restoreCursor(player, dropped);
                 return;
             }
             slot = click[0];
+        } else if (takeOutside(seat, dropped) || !removedFromSlot(player, seat, slot, dropped)) {
+            // Closing a 2x2, anvil or grindstone with a full bag drops those inputs. They are not the hotbar
+            // slot. Subtracting the hotbar here deleted a different stack and lost the grid items.
+            // Swallow so the server's cancel-restore cannot also insert them while a trusted write stashes them.
+            swallow(event);
+            keepSpill(player, seat, dropped);
+            return;
         }
-        int amount = Math.max(1, event.getItemDrop().getItemStack().getAmount());
+        int amount = Math.max(1, dropped == null ? 1 : dropped.getAmount());
         if (slot >= 0 && slot < BAG && isAotv(shown(seat)[slot])) {
+            swallow(event);
             tell(player, "The sword stays in the bag.", NamedTextColor.YELLOW);
+            if (seat.trustLocal) {
+                giveBack(player, dropped);
+            } else {
+                schedule(player);
+            }
+            return;
+        }
+        if (seat.trustLocal) {
+            // Vanilla already took the stack out. The server would put it back after this event returns, which
+            // would sign it as still present. Swallowing leaves the live slot empty, so the trusted write
+            // destroys it once. A failed write paints the signed bag, which still has it.
+            swallow(event);
+            schedule(player);
             return;
         }
         PendingDrop pending = new PendingDrop(slot, amount);
-        BigInteger[] trial = seat.trustLocal ? liveWords(player) : shown(seat);
+        BigInteger[] trial = shown(seat);
         if (!applyDrop(trial, pending)) {
             tell(player, "That item is not signed into that slot yet.", NamedTextColor.RED);
             return;
         }
+        swallow(event);
         seat.drops.add(pending);
-        if (seat.trustLocal) {
-            paint(player, trial);
-        } else {
-            show(player, seat);
-        }
+        show(player, seat);
         schedule(player);
     }
 
@@ -1503,6 +1526,7 @@ final class WordChain implements Listener {
                 trust(player);
             }
             noteLocal(player);
+            rememberOutside(player);
         }
     }
 
@@ -1541,12 +1565,21 @@ final class WordChain implements Listener {
                 trust(player);
             }
             noteLocal(player);
+            rememberOutside(player);
         }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onClose(InventoryCloseEvent event) {
-        if (!(event.getPlayer() instanceof Player player) || event.getView().getTopInventory().getHolder() instanceof Menu) {
+        if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat != null) {
+            // Grid drops already fired. Forget them so a later Q is not treated as a spill.
+            seat.outside.clear();
+        }
+        if (event.getView().getTopInventory().getHolder() instanceof Menu) {
             return;
         }
         if (workbench(event.getInventory())) {
@@ -1563,6 +1596,170 @@ final class WordChain implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onSwap(PlayerSwapHandItemsEvent event) {
         noteLocal(event.getPlayer());
+    }
+
+    /**
+     * Inputs sitting in a grid vanilla drops on close: the 2x2, and anvil, grindstone, smithing and enchant inputs.
+     * The result slot is a preview and is not recorded, so a close cannot stash a craft the player did not take.
+     */
+    private void rememberOutside(Player player) {
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null) {
+            return;
+        }
+        seat.outside.clear();
+        Inventory top = player.getOpenInventory().getTopInventory();
+        if (top == null || top.getHolder() instanceof Menu) {
+            return;
+        }
+        if (top instanceof CraftingInventory crafting
+                && (top.getType() == InventoryType.CRAFTING || top.getType() == InventoryType.WORKBENCH)) {
+            for (ItemStack stack : crafting.getMatrix()) {
+                keepOutside(seat, stack);
+            }
+            return;
+        }
+        InventoryType type = top.getType();
+        int limit = top.getSize();
+        if (type == InventoryType.ANVIL || type == InventoryType.GRINDSTONE || type == InventoryType.SMITHING) {
+            limit = Math.max(0, limit - 1);
+        } else if (type != InventoryType.ENCHANTING) {
+            return;
+        }
+        for (int i = 0; i < limit; i++) {
+            keepOutside(seat, top.getItem(i));
+        }
+    }
+
+    private static void keepOutside(Seat seat, ItemStack stack) {
+        if (stack != null && !stack.getType().isAir() && stack.getAmount() > 0) {
+            seat.outside.add(stack.clone());
+        }
+    }
+
+    /** True when this drop is one of the recorded grid inputs. Consumes the match so the next stack still matches. */
+    private boolean takeOutside(Seat seat, ItemStack dropped) {
+        if (dropped == null || seat.outside.isEmpty()) {
+            return false;
+        }
+        int id = HoldItems.id(dropped, plugin);
+        if (id == 0) {
+            return false;
+        }
+        int need = Math.max(1, dropped.getAmount());
+        int have = 0;
+        for (ItemStack stack : seat.outside) {
+            if (stack != null && stack.getAmount() > 0 && HoldItems.id(stack, plugin) == id) {
+                have += stack.getAmount();
+            }
+        }
+        if (have < need) {
+            return false;
+        }
+        for (ItemStack stack : seat.outside) {
+            if (need <= 0) {
+                break;
+            }
+            if (stack == null || stack.getAmount() <= 0 || HoldItems.id(stack, plugin) != id) {
+                continue;
+            }
+            int use = Math.min(stack.getAmount(), need);
+            stack.setAmount(stack.getAmount() - use);
+            need -= use;
+        }
+        return true;
+    }
+
+    /** Q already removed this stack from the slot. A grid spill leaves the hotbar count alone. */
+    private boolean removedFromSlot(Player player, Seat seat, int slot, ItemStack dropped) {
+        if (dropped == null || slot < 0 || slot >= BAG) {
+            return false;
+        }
+        int dropId = HoldItems.id(dropped, plugin);
+        BigInteger signed = shown(seat)[slot];
+        if (dropId == 0 || !isFungible(signed) || itemId(signed) != dropId) {
+            return false;
+        }
+        ItemStack live = player.getInventory().getItem(slot);
+        int liveCount = live == null || live.getType().isAir() ? 0 : live.getAmount();
+        return liveCount + Math.max(1, dropped.getAmount()) == count(signed);
+    }
+
+    /**
+     * The spill is cancelled, so it is not on the ground. While the bag still holds those stacks, the next paint
+     * puts them back. A trusted write is about to sign the live bag without them, so they go to the stash only
+     * if that write lands.
+     */
+    private void keepSpill(Player player, Seat seat, ItemStack dropped) {
+        if (swordSerial(dropped) != null) {
+            tell(player, "The sword stays in the bag.", NamedTextColor.YELLOW);
+            if (seat.trustLocal) {
+                giveBack(player, dropped);
+            } else {
+                schedule(player);
+            }
+            return;
+        }
+        if (seat.trustLocal && dropped != null) {
+            String key = HoldItems.keyOf(dropped, plugin);
+            int qty = dropped.getAmount();
+            if (key != null && qty > 0) {
+                UUID id = player.getUniqueId();
+                seat.hooks.add(ok -> {
+                    if (ok && plugin.market() != null) {
+                        plugin.market().giveOrStash(id, key, qty, true);
+                    }
+                });
+            }
+        } else if (seat.spillTold != Bukkit.getCurrentTick()) {
+            seat.spillTold = Bukkit.getCurrentTick();
+            tell(player, "Your bag is full. Those items stay in the bag.", NamedTextColor.YELLOW);
+        }
+        schedule(player);
+    }
+
+    /**
+     * A cancelled drop is put back by the server after this event: into the main hand, or via addItem, which
+     * discards whatever does not fit. Emptying the drop entity makes that restore a no-op.
+     */
+    private static void swallow(PlayerDropItemEvent event) {
+        org.bukkit.entity.Item entity = event.getItemDrop();
+        if (entity != null) {
+            entity.setItemStack(new ItemStack(Material.AIR));
+        }
+    }
+
+    /** The cursor is empty by the time the drop fires. Put the stack back there, where a full bag can still hold it. */
+    private static void restoreCursor(Player player, ItemStack dropped) {
+        if (dropped == null || dropped.getType().isAir() || dropped.getAmount() <= 0) {
+            return;
+        }
+        ItemStack cursor = player.getItemOnCursor();
+        if (cursor == null || cursor.getType().isAir()) {
+            player.setItemOnCursor(dropped);
+            return;
+        }
+        if (cursor.isSimilar(dropped) && cursor.getAmount() + dropped.getAmount() <= cursor.getMaxStackSize()) {
+            cursor.setAmount(cursor.getAmount() + dropped.getAmount());
+            player.setItemOnCursor(cursor);
+            return;
+        }
+        giveBack(player, dropped);
+    }
+
+    /** Puts a cancelled drop back into the live bag. The signed layout still has it, so it must not be signed away. */
+    private static void giveBack(Player player, ItemStack dropped) {
+        if (dropped == null || dropped.getType().isAir() || dropped.getAmount() <= 0) {
+            return;
+        }
+        Map<Integer, ItemStack> left = player.getInventory().addItem(dropped.clone());
+        if (left.isEmpty()) {
+            return;
+        }
+        ItemStack cursor = player.getItemOnCursor();
+        if (cursor == null || cursor.getType().isAir()) {
+            player.setItemOnCursor(dropped.clone());
+        }
     }
 
     /**
@@ -3708,6 +3905,9 @@ final class WordChain implements Listener {
         boolean again;
         int castTick = -1;
         boolean cursorNoted;
+        /** Inputs in a grid that drops them on close. Cleared once that inventory closes. */
+        final List<ItemStack> outside = new ArrayList<>();
+        int spillTold = -1;
         Location snapBack;
         int task = -1;
         final Set<Long> held = new HashSet<>();

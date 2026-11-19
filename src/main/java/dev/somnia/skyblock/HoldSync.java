@@ -273,6 +273,11 @@ final class HoldSync implements Listener {
         if (player.getGameMode() == GameMode.CREATIVE) {
             return;
         }
+        // SkyWord owns drops. Cancelling here meant Q never reached WordChain, and a crafting-grid
+        // spill on a full bag was marked "destroyed" and then painted back, or not at all.
+        if (plugin.wordMode()) {
+            return;
+        }
         event.setCancelled(true);
         if (sandbox.contains(player.getUniqueId()) || paused.contains(player.getUniqueId())) {
             return;
