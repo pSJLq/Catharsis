@@ -15,9 +15,13 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityCombustByEntityEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.vehicle.VehicleEntityCollisionEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
@@ -310,7 +314,8 @@ final class Visits implements Listener {
 
     /**
      * A right-click in the air never hits the block guard. An ender pearl or chorus fruit then leaves the
-     * island, and a spawn egg leaves a mob on the host's Hearth. The item stays in the hand.
+     * island, a spawn egg or a splash potion leaves a mob or an effect, and a fire charge is consumed even
+     * when the launch is cancelled. The item stays in the hand.
      */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onAirToss(PlayerInteractEvent event) {
@@ -334,7 +339,9 @@ final class Visits implements Listener {
         if (type == null) {
             return false;
         }
-        if (type == Material.ENDER_PEARL || type == Material.CHORUS_FRUIT) {
+        if (type == Material.ENDER_PEARL || type == Material.CHORUS_FRUIT
+                || type == Material.FIRE_CHARGE || type == Material.WIND_CHARGE
+                || type == Material.SPLASH_POTION || type == Material.LINGERING_POTION) {
             return true;
         }
         return type.name().endsWith("_SPAWN_EGG");
@@ -359,8 +366,10 @@ final class Visits implements Listener {
             return;
         }
         org.bukkit.entity.Entity shot = event.getEntity();
-        boolean lights = shot instanceof org.bukkit.entity.Fireball || shot instanceof org.bukkit.entity.WindCharge;
-        if (!lights || mayEdit(player, player.getLocation())) {
+        boolean hostile = shot instanceof org.bukkit.entity.Fireball
+                || shot instanceof org.bukkit.entity.WindCharge
+                || shot instanceof org.bukkit.entity.ThrownPotion;
+        if (!hostile || mayEdit(player, player.getLocation())) {
             return;
         }
         event.setCancelled(true);
@@ -601,6 +610,69 @@ final class Visits implements Listener {
             event.setCancelled(true);
             deny(event.getPlayer());
         }
+    }
+
+    /**
+     * An arrow, snowball or trident still hits after the damage event is cancelled: tipped arrows apply effects,
+     * flame sets the mob on fire, and a target or tripwire runs the host's redstone. Fishing stays allowed.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onProjectileHit(ProjectileHitEvent event) {
+        if (event.getEntity() instanceof org.bukkit.entity.FishHook) {
+            return;
+        }
+        if (!(event.getEntity().getShooter() instanceof Player player)) {
+            return;
+        }
+        Location at = event.getHitEntity() != null ? event.getHitEntity().getLocation()
+                : event.getHitBlock() != null ? event.getHitBlock().getLocation()
+                : player.getLocation();
+        if (!mayEdit(player, at)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Poison and weakness are not damage, so the hit cancel does not stop them. A guest's own drink still works. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuestPotion(EntityPotionEffectEvent event) {
+        EntityPotionEffectEvent.Action action = event.getAction();
+        if (action != EntityPotionEffectEvent.Action.ADDED && action != EntityPotionEffectEvent.Action.CHANGED) {
+            return;
+        }
+        if (!(Stats.credit(event.getSource()) instanceof Player actor) || event.getEntity().equals(actor)) {
+            return;
+        }
+        if (!mayEdit(actor, event.getEntity().getLocation())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Flame and a burning arrow set the mob on fire even when the hit itself is cancelled. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuestBurn(EntityCombustByEntityEvent event) {
+        if (!(Stats.credit(event.getCombuster()) instanceof Player actor) || event.getEntity().equals(actor)) {
+            return;
+        }
+        if (!mayEdit(actor, event.getEntity().getLocation())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * Walking into a boat or a chest minecart pushes it. A guest can shove it into the void.
+     * The collision flag is a separate field from cancel, and the push path still reads it.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    @SuppressWarnings({"deprecation", "removal"})
+    public void onVehiclePush(VehicleEntityCollisionEvent event) {
+        if (!(Stats.credit(event.getEntity()) instanceof Player player)) {
+            return;
+        }
+        if (mayEdit(player, event.getVehicle().getLocation())) {
+            return;
+        }
+        event.setCancelled(true);
+        event.setCollisionCancelled(true);
     }
 
     @EventHandler
