@@ -2429,6 +2429,23 @@ final class HubManager implements Listener {
         }
     }
 
+    /**
+     * Walking into a decorative cart or boat shoves it off the landmark. Destroy is already blocked; the move is not.
+     * The collision flag is a separate field from cancel, and the push path still reads it.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    @SuppressWarnings({"deprecation", "removal"})
+    public void onGuardVehiclePush(org.bukkit.event.vehicle.VehicleEntityCollisionEvent event) {
+        if (!isHub(event.getVehicle().getWorld()) || designedRide(event.getVehicle())) {
+            return;
+        }
+        if (event.getEntity() instanceof Player player && player.getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        event.setCancelled(true);
+        event.setCollisionCancelled(true);
+    }
+
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGuardVehicleEnter(org.bukkit.event.vehicle.VehicleEnterEvent event) {
         if (!isHub(event.getVehicle().getWorld()) || !(event.getEntered() instanceof Player player)) {
