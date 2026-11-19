@@ -20,6 +20,7 @@ import org.bukkit.event.hanging.HangingPlaceEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -176,6 +177,23 @@ final class ItemSync implements Listener {
         if (event.getEntity() instanceof Player player && gasBlocked(player)) {
             event.setCancelled(true);
         }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFishGas(PlayerFishEvent event) {
+        if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH
+                && event.getState() != PlayerFishEvent.State.CAUGHT_ENTITY) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (!gasBlocked(player)) {
+            return;
+        }
+        event.setCancelled(true);
+        if (event.getCaught() != null) {
+            event.getCaught().remove();
+        }
+        tellGas(player);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
