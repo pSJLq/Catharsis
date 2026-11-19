@@ -8,6 +8,7 @@ import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Levelled;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Cancellable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -19,12 +20,16 @@ import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.hanging.HangingPlaceEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
+import org.bukkit.event.player.PlayerBucketEntityEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.entity.PlayerLeashEntityEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerShearEntityEvent;
+import org.bukkit.event.player.PlayerTakeLecternBookEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 import java.util.Set;
@@ -198,6 +203,173 @@ final class ItemSync implements Listener {
         tellGas(player);
     }
 
+    /**
+     * Uses that move an item between the bag and the world, same class as a frame. With too little gas the write
+     * rolls the bag back and the block keeps the book, disc, pot item or grown crop. Wait instead, and snapshot
+     * the block so a later non-gas failure puts it back.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onStore(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        org.bukkit.inventory.ItemStack hand = event.getItem();
+        if (hand != null && hand.getType() == Material.BONE_MEAL) {
+            if (denyGas(event, event.getPlayer())) {
+                return;
+            }
+            // BlockFertilizeEvent snapshots the blocks that actually change.
+            return;
+        }
+        if (!storesHeldItem(block, hand)) {
+            return;
+        }
+        if (denyGas(event, event.getPlayer())) {
+            return;
+        }
+        snapBlock(event.getPlayer(), block);
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onLecternGas(PlayerTakeLecternBookEvent event) {
+        if (denyGas(event, event.getPlayer())) {
+            return;
+        }
+        snapBlock(event.getPlayer(), event.getLectern().getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLecternTaken(PlayerTakeLecternBookEvent event) {
+        sync(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFertilizeGas(BlockFertilizeEvent event) {
+        Player player = event.getPlayer();
+        if (player == null) {
+            return;
+        }
+        if (denyGas(event, player)) {
+            return;
+        }
+        snapBlock(player, event.getBlock());
+        for (org.bukkit.block.BlockState state : event.getBlocks()) {
+            if (state != null) {
+                snapBlock(player, state.getBlock());
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onHarvestGas(PlayerHarvestBlockEvent event) {
+        if (denyGas(event, event.getPlayer())) {
+            return;
+        }
+        snapBlock(event.getPlayer(), event.getHarvestedBlock());
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBucketEmptyGas(PlayerBucketEmptyEvent event) {
+        if (denyGas(event, event.getPlayer())) {
+            return;
+        }
+        snapBlock(event.getPlayer(), event.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBucketFillGas(PlayerBucketFillEvent event) {
+        if (denyGas(event, event.getPlayer())) {
+            return;
+        }
+        snapBlock(event.getPlayer(), event.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBucketEntityGas(PlayerBucketEntityEvent event) {
+        denyGas(event, event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBucketEntity(PlayerBucketEntityEvent event) {
+        sync(event.getPlayer());
+    }
+
+    /** Wool, mushrooms and honeycomb would otherwise sit on the ground for anyone who can pay gas. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onShearGas(PlayerShearEntityEvent event) {
+        denyGas(event, event.getPlayer());
+    }
+
+    /** A lead that returns to the bag while the knot stays is a second lead when the knot is broken. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onLeashGas(PlayerLeashEntityEvent event) {
+        denyGas(event, event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLeashed(PlayerLeashEntityEvent event) {
+        sync(event.getPlayer());
+    }
+
+    private boolean denyGas(Cancellable event, Player player) {
+        if (!gasBlocked(player)) {
+            return false;
+        }
+        event.setCancelled(true);
+        tellGas(player);
+        return true;
+    }
+
+    private void snapBlock(Player player, Block block) {
+        if (block != null && plugin.words() != null && chainBag(player)) {
+            plugin.words().rememberBlock(player, block);
+        }
+    }
+
+    /** Right-click that puts an item into a block, or takes one out. A full composter is handled in {@link #onComposter}. */
+    private static boolean storesHeldItem(Block block, org.bukkit.inventory.ItemStack hand) {
+        Material type = block.getType();
+        Material held = hand == null ? Material.AIR : hand.getType();
+        boolean empty = held.isAir();
+        if (type == Material.COMPOSTER) {
+            if (!(block.getBlockData() instanceof Levelled level) || level.getLevel() >= level.getMaximumLevel()) {
+                return false;
+            }
+            return !empty;
+        }
+        if (type == Material.JUKEBOX) {
+            boolean disc = block.getState() instanceof org.bukkit.block.Jukebox juke && juke.hasRecord();
+            return disc || held.name().contains("MUSIC_DISC");
+        }
+        if (type == Material.LECTERN) {
+            return held == Material.WRITABLE_BOOK || held == Material.WRITTEN_BOOK;
+        }
+        if (type == Material.CHISELED_BOOKSHELF) {
+            return empty || held == Material.BOOK || held == Material.ENCHANTED_BOOK
+                    || held == Material.WRITABLE_BOOK || held == Material.WRITTEN_BOOK || held == Material.KNOWLEDGE_BOOK;
+        }
+        if (type == Material.DECORATED_POT) {
+            return !empty;
+        }
+        if ((type == Material.CAMPFIRE || type == Material.SOUL_CAMPFIRE) && held.isEdible()) {
+            return true;
+        }
+        if (type == Material.FLOWER_POT) {
+            return !empty;
+        }
+        if ((type == Material.BEEHIVE || type == Material.BEE_NEST)
+                && (held == Material.GLASS_BOTTLE || held == Material.SHEARS)
+                && block.getBlockData() instanceof org.bukkit.block.data.type.Beehive hive) {
+            return hive.getHoneyLevel() >= hive.getMaximumHoneyLevel();
+        }
+        if (type == Material.RESPAWN_ANCHOR && held == Material.GLOWSTONE
+                && block.getBlockData() instanceof org.bukkit.block.data.type.RespawnAnchor anchor) {
+            return anchor.getCharges() < anchor.getMaximumCharges();
+        }
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onComposter(PlayerInteractEvent event) {
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK || event.getHand() != EquipmentSlot.HAND) {
@@ -212,7 +384,12 @@ final class ItemSync implements Listener {
             return;
         }
         // Full composter: take the bone meal into the bag instead of dropping it on the ground.
+        // Do not empty it when the purse cannot pay: the harvest would be stashed and the level already spent.
         event.setCancelled(true);
+        if (gasBlocked(player)) {
+            tellGas(player);
+            return;
+        }
         if (!plugin.words().ready(player)) {
             player.sendMessage(Component.text("The chain inventory is still loading.", NamedTextColor.RED));
             return;

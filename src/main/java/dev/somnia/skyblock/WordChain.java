@@ -2524,6 +2524,22 @@ final class WordChain implements Listener {
         rememberSnap(seat, WorldSnap.spawned(entity));
     }
 
+    /**
+     * Lectern, jukebox, bookshelf, pot, campfire, composter, flower pot, hive, anchor, bucket and harvest.
+     * The first click of a pending write remembers the block. A full rollback puts that block back, so the
+     * item cannot sit in the block and in the bag.
+     */
+    void rememberBlock(Player player, Block block) {
+        if (block == null || block.getWorld() == null || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.block(block));
+    }
+
     private void rememberSnap(Seat seat, WorldSnap snap) {
         if (snap == null) {
             return;
@@ -2568,20 +2584,27 @@ final class WordChain implements Listener {
         static final int FRAME = 2;
         static final int STAND = 3;
         static final int SPAWNED = 4;
+        static final int BLOCK = 5;
         final int kind;
         final String key;
         final Location location;
         final UUID entity;
         final UUID owner;
         final ItemStack[] items;
+        final String data;
 
         private WorldSnap(int kind, String key, Location location, UUID entity, UUID owner, ItemStack[] items) {
+            this(kind, key, location, entity, owner, items, null);
+        }
+
+        private WorldSnap(int kind, String key, Location location, UUID entity, UUID owner, ItemStack[] items, String data) {
             this.kind = kind;
             this.key = key;
             this.location = location;
             this.entity = entity;
             this.owner = owner;
             this.items = items;
+            this.data = data;
         }
 
         static WorldSnap container(Location location, ItemStack[] contents) {
@@ -2614,6 +2637,29 @@ final class WordChain implements Listener {
 
         static WorldSnap spawned(Entity entity) {
             return new WorldSnap(SPAWNED, "n:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
+        }
+
+        /**
+         * Block data, plus the live inventory when the block holds items (lectern, jukebox, bookshelf, pot).
+         * Campfire items live on the snapshot and are applied with {@code update}. Placed inventories
+         * ({@code getInventory} when the state is placed) write through, so they are not updated again.
+         */
+        static WorldSnap block(Block block) {
+            Location at = block.getLocation().clone();
+            String data = block.getBlockData().getAsString();
+            org.bukkit.block.BlockState state = block.getState();
+            ItemStack[] items = null;
+            if (state instanceof org.bukkit.inventory.BlockInventoryHolder holder) {
+                items = cloneContents(holder.getInventory().getContents());
+            } else if (state instanceof org.bukkit.block.Campfire camp) {
+                items = new ItemStack[camp.getSize()];
+                for (int i = 0; i < items.length; i++) {
+                    ItemStack stack = camp.getItem(i);
+                    items[i] = stack == null || stack.getType().isAir() ? null : stack.clone();
+                }
+            }
+            return new WorldSnap(BLOCK, "b:" + at.getWorld().getName() + ":" + at.getBlockX() + ":" + at.getBlockY() + ":" + at.getBlockZ(),
+                    at, null, null, items, data);
         }
 
         /** Entity ItemSync snapshotted because placing it took an item out of the bag. Tagged stands are minions and NPC labels. */
@@ -2664,6 +2710,32 @@ final class WordChain implements Listener {
                     for (int i = 0; i < STAND_SLOTS.length && i < items.length; i++) {
                         stand.getEquipment().setItem(STAND_SLOTS[i], items[i] == null ? null : items[i].clone());
                     }
+                }
+                return;
+            }
+            if (kind == BLOCK && location != null && location.getWorld() != null) {
+                Block block = location.getBlock();
+                if (data != null) {
+                    try {
+                        block.setBlockData(Bukkit.createBlockData(data), false);
+                    } catch (IllegalArgumentException ignored) {
+                        // the saved string is no longer a block this server knows
+                    }
+                }
+                if (items == null) {
+                    return;
+                }
+                org.bukkit.block.BlockState state = block.getState();
+                if (state instanceof org.bukkit.inventory.BlockInventoryHolder holder && holder.getInventory().getSize() == items.length) {
+                    // Placed lectern / jukebox / bookshelf / pot: getInventory() is the live block entity.
+                    holder.getInventory().setContents(cloneContents(items));
+                    return;
+                }
+                if (state instanceof org.bukkit.block.Campfire camp) {
+                    for (int i = 0; i < camp.getSize() && i < items.length; i++) {
+                        camp.setItem(i, items[i] == null ? null : items[i].clone());
+                    }
+                    camp.update(true, false);
                 }
                 return;
             }
