@@ -820,6 +820,21 @@ final class WordChain implements Listener {
     }
 
     /**
+     * A copper golem carries stacks from a copper chest into another chest. That move is not always a hopper
+     * event. A full rollback would put the snapshot back and leave the copy in the destination.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onSnapHauler(io.papermc.paper.event.entity.ItemTransportingEntityValidateTargetEvent event) {
+        if (!anySnaps() && !anyPlacing()) {
+            return;
+        }
+        Block block = event.getBlock();
+        if (block != null && (snapLocksBlock(block) || heldUp(block) || placeHeld(block))) {
+            event.setAllowed(false);
+        }
+    }
+
+    /**
      * Breaking a snapshotted frame, stand, boat, cart or chested animal drops the item and the rollback puts it
      * back as well. Hold the entity still until the write lands or is fully rolled back.
      */
@@ -1477,7 +1492,15 @@ final class WordChain implements Listener {
         return a.getBlockX() == b.getBlockX() && a.getBlockY() == b.getBlockY() && a.getBlockZ() == b.getBlockZ();
     }
 
-    /** The other half of a double chest. Hoppers address whichever half they touch. */
+    /** A normal chest, a trapped chest, or a copper chest that can form a double. */
+    private static boolean pairableChest(Material type) {
+        if (type == Material.CHEST || type == Material.TRAPPED_CHEST) {
+            return true;
+        }
+        return type != null && type.name().endsWith("COPPER_CHEST");
+    }
+
+    /** The other half of a double chest. Hoppers and a copper golem address whichever half they touch. */
     private static boolean linkedChest(Location snapAt, Location other) {
         if (snapAt.getWorld() == null || other.getWorld() == null || !snapAt.getWorld().equals(other.getWorld())) {
             return false;
@@ -1491,10 +1514,10 @@ final class WordChain implements Listener {
         Block a = snapAt.getBlock();
         Block b = other.getBlock();
         Material type = a.getType();
-        if ((type != Material.CHEST && type != Material.TRAPPED_CHEST) || type != b.getType()) {
+        if (!pairableChest(type) || type != b.getType()) {
             return false;
         }
-        if (!(a.getState() instanceof org.bukkit.block.Chest ca) || !(b.getState() instanceof org.bukkit.block.Chest cb)) {
+        if (!(a.getState() instanceof Container ca) || !(b.getState() instanceof Container cb)) {
             return false;
         }
         InventoryHolder ha = ca.getInventory().getHolder();

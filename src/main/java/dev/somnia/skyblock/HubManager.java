@@ -2562,7 +2562,7 @@ final class HubManager implements Listener {
             return true;
         }
         return n.endsWith("SHULKER_BOX") || n.endsWith("CANDLE_CAKE") || n.startsWith("POTTED_")
-                || n.endsWith("_CAULDRON") || n.endsWith("_SHELF");
+                || n.endsWith("_CAULDRON") || n.endsWith("_SHELF") || n.endsWith("COPPER_CHEST");
     }
 
     /** Axe-strip, shovel path, hoe-till, flint and steel: they rewrite protected hub blocks. */
@@ -2749,6 +2749,15 @@ final class HubManager implements Listener {
     public void onGuardLeash(org.bukkit.event.entity.PlayerLeashEntityEvent event) {
         if (guarded(event.getPlayer(), event.getEntity().getWorld())) {
             event.setCancelled(true);
+        }
+    }
+
+    /** A copper golem would carry Gate chest loot into a chest the build never opens for players. */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onGuardHauler(io.papermc.paper.event.entity.ItemTransportingEntityValidateTargetEvent event) {
+        Block block = event.getBlock();
+        if (block != null && block.getWorld() != null && isHub(block.getWorld())) {
+            event.setAllowed(false);
         }
     }
 
