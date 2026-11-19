@@ -2239,9 +2239,65 @@ final class HubManager implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onGuardTrample(org.bukkit.event.player.PlayerInteractEvent event) {
-        if (event.getAction() == org.bukkit.event.block.Action.PHYSICAL && event.getClickedBlock() != null
-                && event.getClickedBlock().getType() == Material.FARMLAND && isHub(event.getClickedBlock().getWorld())) {
+        if (event.getAction() != org.bukkit.event.block.Action.PHYSICAL || event.getClickedBlock() == null
+                || !isHub(event.getClickedBlock().getWorld())) {
+            return;
+        }
+        Material type = event.getClickedBlock().getType();
+        if (type == Material.FARMLAND || type == Material.TURTLE_EGG || type == Material.SNIFFER_EGG) {
             event.setCancelled(true);
+        }
+    }
+
+    /** Pistons would slide the build apart. Buttons and doors still click; they just cannot push blocks. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPiston(org.bukkit.event.block.BlockPistonExtendEvent event) {
+        if (isHub(event.getBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPistonRetract(org.bukkit.event.block.BlockPistonRetractEvent event) {
+        if (isHub(event.getBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Bone meal grows harvestable flowers off the regen spots, and dispensers are already blocked. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardFertilize(org.bukkit.event.block.BlockFertilizeEvent event) {
+        if (!isHub(event.getBlock().getWorld())) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (player != null && player.getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        event.setCancelled(true);
+    }
+
+    /**
+     * Eggs, spawn eggs and breeding would leave animals that lay more eggs. Plugin carts and mobs use CUSTOM.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardSpawn(org.bukkit.event.entity.CreatureSpawnEvent event) {
+        if (!isHub(event.getEntity().getWorld())) {
+            return;
+        }
+        org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason reason = event.getSpawnReason();
+        if (reason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM
+                || reason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT) {
+            return;
+        }
+        event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardEgg(org.bukkit.event.player.PlayerEggThrowEvent event) {
+        if (event.getEgg().getWorld() != null && isHub(event.getEgg().getWorld())
+                && event.getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+            event.setHatching(false);
         }
     }
 
@@ -2513,19 +2569,49 @@ final class HubManager implements Listener {
                 || t == Material.ROOTED_DIRT);
     }
 
+    /**
+     * Shears turn a pumpkin into seeds plus a carved pumpkin the regen never starts for. Bone meal grows extra
+     * flowers. A bottle fills from hub water. Spawn eggs and dyes rewrite the build.
+     */
+    private static boolean hubItemMutate(Block block, org.bukkit.inventory.ItemStack item) {
+        if (item == null || item.getType().isAir()) {
+            return false;
+        }
+        Material held = item.getType();
+        String name = held.name();
+        if (held == Material.BONE_MEAL || held == Material.SHEARS || held == Material.BRUSH
+                || held == Material.HONEYCOMB || held == Material.INK_SAC || held == Material.GLOW_INK_SAC
+                || name.endsWith("_SPAWN_EGG") || name.endsWith("_DYE")) {
+            return true;
+        }
+        if (held != Material.GLASS_BOTTLE) {
+            return false;
+        }
+        if (block.getType() == Material.WATER || block.getType() == Material.BUBBLE_COLUMN) {
+            return true;
+        }
+        return block.getBlockData() instanceof org.bukkit.block.data.Waterlogged logged && logged.isWaterlogged();
+    }
+
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGuardLoot(org.bukkit.event.player.PlayerInteractEvent event) {
-        if (event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+        Block block = event.getClickedBlock();
+        if (block == null || !isHub(block.getWorld()) || event.getPlayer().getGameMode() == org.bukkit.GameMode.CREATIVE) {
             return;
         }
-        Block block = event.getClickedBlock();
-        if (!isHub(block.getWorld()) || event.getPlayer().getGameMode() == org.bukkit.GameMode.CREATIVE) {
+        org.bukkit.event.block.Action action = event.getAction();
+        if (block.getType() == Material.DRAGON_EGG
+                && (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK || action == org.bukkit.event.block.Action.LEFT_CLICK_BLOCK)) {
+            event.setCancelled(true);
+            return;
+        }
+        if (action != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
             return;
         }
         if (block.getType() == Material.CRAFTING_TABLE) {
             return;
         }
-        if (hubLootable(block.getType()) || hubToolMutate(block, event.getItem())) {
+        if (hubLootable(block.getType()) || hubToolMutate(block, event.getItem()) || hubItemMutate(block, event.getItem())) {
             event.setCancelled(true);
         }
     }
