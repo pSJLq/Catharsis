@@ -2359,8 +2359,9 @@ final class HubManager implements Listener {
     }
 
     /**
-     * Decorative hub entities (Gate minecarts, boats, frames, stands, paintings, crystals, holograms).
-     * Combat mobs and NPC bodies have their own handlers and must stay hittable / clickable.
+     * Decorative hub entities (Gate minecarts, boats, frames, stands, paintings, crystals, holograms,
+     * animals and other living props). Combat mobs and NPC bodies have their own handlers and must
+     * stay hittable / clickable.
      */
     private static boolean hubProp(Entity entity) {
         if (entity == null || entity instanceof Player) {
@@ -2378,11 +2379,16 @@ final class HubManager implements Listener {
                 || type == org.bukkit.entity.EntityType.ZOMBIE_NAUTILUS) {
             return true;
         }
+        String name = type.name();
+        if (name.equals("INTERACTION") || name.equals("MARKER")) {
+            return true;
+        }
         return entity instanceof org.bukkit.entity.Vehicle
                 || entity instanceof org.bukkit.entity.Hanging
                 || entity instanceof org.bukkit.entity.ArmorStand
                 || entity instanceof org.bukkit.entity.EnderCrystal
-                || entity instanceof Display;
+                || entity instanceof Display
+                || entity instanceof org.bukkit.entity.LivingEntity;
     }
 
     /** A cushion is a seat. It must not be broken, and sitting on it is not a ride. */
@@ -2533,6 +2539,49 @@ final class HubManager implements Listener {
         if (isHub(entity.getWorld()) && hubProp(entity)) {
             event.getDrops().clear();
             event.setDroppedExp(0);
+        }
+    }
+
+    /** A chicken, sniffer or allay in the build would otherwise lay or hand out a free item. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPropLay(org.bukkit.event.entity.EntityDropItemEvent event) {
+        Entity entity = event.getEntity();
+        if (isHub(entity.getWorld()) && hubProp(entity)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Fire would keep ticking a prop that can no longer die, and a drowned conversion is not this event. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPropBurn(org.bukkit.event.entity.EntityCombustEvent event) {
+        Entity entity = event.getEntity();
+        if (isHub(entity.getWorld()) && hubProp(entity)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * A Barrow Shambler is a zombie. Water converts it into a drowned that is not a combat mob, so the
+     * spawn point loses it and the drowned can be killed for vanilla drops. Props must not change either.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardTransform(org.bukkit.event.entity.EntityTransformEvent event) {
+        Entity entity = event.getEntity();
+        if (!isHub(entity.getWorld()) || entity instanceof Player) {
+            return;
+        }
+        if (hubProp(entity) || entity.getScoreboardTags().contains(Mobs.TAG)
+                || entity.getScoreboardTags().contains(Npcs.TAG) || entity instanceof Villager) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** An allay or a fox in the build must not carry a caught fish or a framed item away. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardMobPickup(org.bukkit.event.entity.EntityPickupItemEvent event) {
+        Entity entity = event.getEntity();
+        if (!(entity instanceof Player) && isHub(entity.getWorld())) {
+            event.setCancelled(true);
         }
     }
 
