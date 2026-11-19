@@ -2369,11 +2369,25 @@ final class HubManager implements Listener {
         if (entity.getScoreboardTags().contains(Npcs.TAG) || entity.getScoreboardTags().contains(Mobs.TAG)) {
             return false;
         }
+        org.bukkit.entity.EntityType type = entity.getType();
+        if (type == org.bukkit.entity.EntityType.CUSHION
+                || type == org.bukkit.entity.EntityType.MANNEQUIN
+                || type == org.bukkit.entity.EntityType.COPPER_GOLEM
+                || type == org.bukkit.entity.EntityType.HAPPY_GHAST
+                || type == org.bukkit.entity.EntityType.NAUTILUS
+                || type == org.bukkit.entity.EntityType.ZOMBIE_NAUTILUS) {
+            return true;
+        }
         return entity instanceof org.bukkit.entity.Vehicle
                 || entity instanceof org.bukkit.entity.Hanging
                 || entity instanceof org.bukkit.entity.ArmorStand
                 || entity instanceof org.bukkit.entity.EnderCrystal
                 || entity instanceof Display;
+    }
+
+    /** A cushion is a seat. It must not be broken, and sitting on it is not a ride. */
+    private static boolean designedSeat(Entity entity) {
+        return designedRide(entity) || entity.getType() == org.bukkit.entity.EntityType.CUSHION;
     }
 
     private boolean hubNpc(Entity entity) {
@@ -2461,7 +2475,7 @@ final class HubManager implements Listener {
         if (!(event.getEntity() instanceof Player player) || !guarded(player, event.getMount().getWorld())) {
             return;
         }
-        if (hubProp(event.getMount()) && !designedRide(event.getMount())) {
+        if (hubProp(event.getMount()) && !designedSeat(event.getMount())) {
             event.setCancelled(true);
         }
     }
@@ -2531,7 +2545,8 @@ final class HubManager implements Listener {
         String name = type.name();
         if (name.contains("MINECART") || name.contains("BOAT") || name.endsWith("_RAFT")
                 || type == Material.ARMOR_STAND || type == Material.ITEM_FRAME || type == Material.GLOW_ITEM_FRAME
-                || type == Material.PAINTING || type == Material.END_CRYSTAL || type == Material.LEAD) {
+                || type == Material.PAINTING || type == Material.END_CRYSTAL || type == Material.LEAD
+                || name.endsWith("_CUSHION")) {
             event.setCancelled(true);
         }
     }
@@ -2708,6 +2723,57 @@ final class HubManager implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGuardDispense(org.bukkit.event.block.BlockDispenseEvent event) {
         if (isHub(event.getBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * A wind charge or a fire charge thrown at the sky never hits the block guard. The burst shoves a Gate
+     * cart off its landmark, and the charge is spent. The item stays in the hand.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardBurst(org.bukkit.event.player.PlayerInteractEvent event) {
+        org.bukkit.event.block.Action action = event.getAction();
+        if (action != org.bukkit.event.block.Action.RIGHT_CLICK_AIR
+                && action != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        org.bukkit.inventory.ItemStack item = event.getItem();
+        if (item == null) {
+            return;
+        }
+        Material type = item.getType();
+        if (type != Material.WIND_CHARGE && type != Material.FIRE_CHARGE) {
+            return;
+        }
+        if (!guarded(event.getPlayer(), event.getPlayer().getWorld())) {
+            return;
+        }
+        event.setCancelled(true);
+        event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+    }
+
+    /** A breeze charge or a charge that still launched. Creative may still burst a landmark. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardWindPrime(org.bukkit.event.entity.ExplosionPrimeEvent event) {
+        Entity primed = event.getEntity();
+        if (!isHub(primed.getWorld()) || !(primed instanceof org.bukkit.entity.AbstractWindCharge charge)) {
+            return;
+        }
+        if (charge.getShooter() instanceof Player player && player.getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        event.setCancelled(true);
+    }
+
+    /** Knockback from a burst is not a walk-into-cart push. Designed rides still move. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPropKnock(io.papermc.paper.event.entity.EntityKnockbackEvent event) {
+        Entity entity = event.getEntity();
+        if (!isHub(entity.getWorld()) || designedRide(entity)) {
+            return;
+        }
+        if (hubProp(entity)) {
             event.setCancelled(true);
         }
     }
