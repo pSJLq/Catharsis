@@ -16,9 +16,12 @@ import org.bukkit.entity.Tameable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityCombustByEntityEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
@@ -225,6 +228,49 @@ final class Stats implements Listener {
         if (health(player) <= 0) {
             event.setCancelled(true);
             die(player, source);
+        }
+    }
+
+    /**
+     * The hit itself is cancelled, but poison, slowness and a flame arrow still land. Poison then ticks as
+     * its own damage and goes through the custom health. Effects from a mob or from your own drink stay.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onPvPPotion(EntityPotionEffectEvent event) {
+        EntityPotionEffectEvent.Action action = event.getAction();
+        if (action != EntityPotionEffectEvent.Action.ADDED && action != EntityPotionEffectEvent.Action.CHANGED) {
+            return;
+        }
+        if (!(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+        if (credit(event.getSource()) instanceof Player actor && !actor.equals(victim)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onPvPBurn(EntityCombustByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+        if (credit(event.getCombuster()) instanceof Player actor && !actor.equals(victim)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** A snowball or arrow still knocks a player back when the damage event is cancelled. A pearl still teleports. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onPvPHit(ProjectileHitEvent event) {
+        if (!(event.getHitEntity() instanceof Player victim)) {
+            return;
+        }
+        org.bukkit.entity.Projectile shot = event.getEntity();
+        if (shot instanceof org.bukkit.entity.EnderPearl || shot instanceof org.bukkit.entity.ThrownExpBottle) {
+            return;
+        }
+        if (shot.getShooter() instanceof Player shooter && !shooter.equals(victim)) {
+            event.setCancelled(true);
         }
     }
 
