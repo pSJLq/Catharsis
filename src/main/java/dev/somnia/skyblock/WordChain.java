@@ -22,12 +22,15 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockBurnEvent;
 import org.bukkit.event.block.BlockCookEvent;
 import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockFadeEvent;
 import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
+import org.bukkit.event.block.LeavesDecayEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -868,13 +871,14 @@ final class WordChain implements Listener {
     }
 
     /**
-     * The snapshot is the block before the book, disc, pot item or crop change. Breaking it, pushing it or
-     * letting water eat it drops that item, and a full rollback puts the snapshot back too (a second copy).
-     * Runs before the snapshot is taken, so the click that starts the write is not cancelled.
+     * The snapshot is the block before the book, disc, pot item or crop change. Breaking it, pushing it,
+     * burning it, or breaking the block it stands on drops that item, and a full rollback puts the snapshot
+     * back too (a second copy). Runs before the snapshot is taken, so the click that starts the write is not cancelled.
      */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapBreak(BlockBreakEvent event) {
-        if (!lockedBlock(event.getBlock())) {
+        Block block = event.getBlock();
+        if (!lockedBlock(block) && !heldUp(block)) {
             return;
         }
         event.setCancelled(true);
@@ -941,20 +945,14 @@ final class WordChain implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapPiston(BlockPistonExtendEvent event) {
-        if (!anySnaps()) {
-            return;
-        }
-        if (lockedBlock(event.getBlock()) || event.getBlocks().stream().anyMatch(this::lockedBlock)) {
+        if (movesLocked(event.getBlock(), event.getBlocks())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapPistonRetract(BlockPistonRetractEvent event) {
-        if (!anySnaps()) {
-            return;
-        }
-        if (lockedBlock(event.getBlock()) || event.getBlocks().stream().anyMatch(this::lockedBlock)) {
+        if (movesLocked(event.getBlock(), event.getBlocks())) {
             event.setCancelled(true);
         }
     }
@@ -979,6 +977,31 @@ final class WordChain implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapFlow(BlockFromToEvent event) {
         if (lockedBlock(event.getToBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Island fire still burns. A lectern, bookshelf or the block under a pot would drop a second copy. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapBurn(BlockBurnEvent event) {
+        Block block = event.getBlock();
+        if (lockedBlock(block) || heldUp(block)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Farmland drying pops the crop above it. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapFade(BlockFadeEvent event) {
+        Block block = event.getBlock();
+        if (lockedBlock(block) || heldUp(block)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapDecay(LeavesDecayEvent event) {
+        if (lockedBlock(event.getBlock())) {
             event.setCancelled(true);
         }
     }
@@ -1093,6 +1116,26 @@ final class WordChain implements Listener {
     /** True when a rollback snapshot already covers this block. The click that creates the snapshot is not locked yet. */
     private boolean lockedBlock(Block block) {
         return block != null && anySnaps() && snapLocksBlock(block);
+    }
+
+    /** A lectern, pot or crop is standing on this block. Breaking or burning it pops the snapshot. */
+    private boolean heldUp(Block block) {
+        return block != null && lockedBlock(block.getRelative(BlockFace.UP));
+    }
+
+    private boolean movesLocked(Block piston, java.util.List<Block> moved) {
+        if (lockedBlock(piston) || heldUp(piston)) {
+            return true;
+        }
+        if (moved == null) {
+            return false;
+        }
+        for (Block block : moved) {
+            if (lockedBlock(block) || heldUp(block)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Chest boat, minecart or animal chest whose rollback is still open. */
