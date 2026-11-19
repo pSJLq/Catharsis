@@ -2463,6 +2463,152 @@ final class HubManager implements Listener {
         }
     }
 
+    /** Chests, barrels, pots, workstations and other blocks that hand out or swallow items. Crafting tables stay usable. */
+    private static boolean hubLootable(Material t) {
+        if (t == null) {
+            return false;
+        }
+        String n = t.name();
+        if (t == Material.CHEST || t == Material.TRAPPED_CHEST || t == Material.BARREL
+                || t == Material.HOPPER || t == Material.DROPPER || t == Material.DISPENSER
+                || t == Material.FURNACE || t == Material.BLAST_FURNACE || t == Material.SMOKER
+                || t == Material.BREWING_STAND || t == Material.ENDER_CHEST
+                || t == Material.LECTERN || t == Material.JUKEBOX || t == Material.CAKE
+                || t == Material.DECORATED_POT || t == Material.FLOWER_POT
+                || t == Material.COMPOSTER || t == Material.SWEET_BERRY_BUSH
+                || t == Material.BEEHIVE || t == Material.BEE_NEST
+                || t == Material.CHISELED_BOOKSHELF || t == Material.CRAFTER
+                || t == Material.ANVIL || t == Material.CHIPPED_ANVIL || t == Material.DAMAGED_ANVIL
+                || t == Material.ENCHANTING_TABLE || t == Material.GRINDSTONE
+                || t == Material.SMITHING_TABLE || t == Material.STONECUTTER
+                || t == Material.LOOM || t == Material.CARTOGRAPHY_TABLE
+                || t == Material.BEACON || t == Material.RESPAWN_ANCHOR
+                || t == Material.CAMPFIRE || t == Material.SOUL_CAMPFIRE
+                || t == Material.CAULDRON || t == Material.WATER_CAULDRON
+                || t == Material.LAVA_CAULDRON || t == Material.POWDER_SNOW_CAULDRON) {
+            return true;
+        }
+        return n.endsWith("SHULKER_BOX") || n.endsWith("CANDLE_CAKE") || n.startsWith("POTTED_")
+                || n.endsWith("_CAULDRON");
+    }
+
+    /** Axe-strip, shovel path, hoe-till, flint and steel: they rewrite protected hub blocks. */
+    private static boolean hubToolMutate(Block block, org.bukkit.inventory.ItemStack item) {
+        if (block == null || item == null || item.getType().isAir()) {
+            return false;
+        }
+        Material t = block.getType();
+        String tool = item.getType().name();
+        if (item.getType() == Material.FLINT_AND_STEEL || item.getType() == Material.FIRE_CHARGE) {
+            return true;
+        }
+        if (tool.endsWith("_AXE") && (isNaturalLog(t) || t.name().endsWith("_WOOD") || t.name().contains("COPPER"))) {
+            return true;
+        }
+        if (tool.endsWith("_SHOVEL") && (org.bukkit.Tag.DIRT.isTagged(t) || t == Material.GRASS_BLOCK
+                || t == Material.CAMPFIRE || t == Material.SOUL_CAMPFIRE)) {
+            return true;
+        }
+        return tool.endsWith("_HOE") && (org.bukkit.Tag.DIRT.isTagged(t) || t == Material.GRASS_BLOCK
+                || t == Material.ROOTED_DIRT);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardLoot(org.bukkit.event.player.PlayerInteractEvent event) {
+        if (event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK || event.getClickedBlock() == null) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (!isHub(block.getWorld()) || event.getPlayer().getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        if (block.getType() == Material.CRAFTING_TABLE) {
+            return;
+        }
+        if (hubLootable(block.getType()) || hubToolMutate(block, event.getItem())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardOpen(org.bukkit.event.inventory.InventoryOpenEvent event) {
+        if (!(event.getPlayer() instanceof Player player) || player.getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            return;
+        }
+        org.bukkit.inventory.Inventory inv = event.getInventory();
+        if (inv.getHolder() instanceof Menu || inv.getHolder() instanceof Player) {
+            return;
+        }
+        org.bukkit.inventory.InventoryHolder holder = inv.getHolder();
+        Location loc = inv.getLocation();
+        World world = loc != null ? loc.getWorld() : (holder instanceof Entity e ? e.getWorld() : player.getWorld());
+        if (!isHub(world)) {
+            return;
+        }
+        if (holder instanceof org.bukkit.block.BlockState || holder instanceof org.bukkit.entity.Vehicle
+                || holder instanceof Entity) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardHarvest(org.bukkit.event.player.PlayerHarvestBlockEvent event) {
+        if (guarded(event.getPlayer(), event.getHarvestedBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardLectern(org.bukkit.event.player.PlayerTakeLecternBookEvent event) {
+        if (guarded(event.getPlayer(), event.getLectern().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardEntityPlace(org.bukkit.event.entity.EntityPlaceEvent event) {
+        if (event.getPlayer() != null && guarded(event.getPlayer(), event.getEntity().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardHangingPlace(org.bukkit.event.hanging.HangingPlaceEvent event) {
+        if (event.getPlayer() != null && guarded(event.getPlayer(), event.getEntity().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardExplode(org.bukkit.event.entity.EntityExplodeEvent event) {
+        if (isHub(event.getEntity().getWorld())) {
+            event.blockList().clear();
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardBlockExplode(org.bukkit.event.block.BlockExplodeEvent event) {
+        if (isHub(event.getBlock().getWorld())) {
+            event.blockList().clear();
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardIgnite(org.bukkit.event.block.BlockIgniteEvent event) {
+        if (isHub(event.getBlock().getWorld()) && !hubCreative(event.getPlayer())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardDispense(org.bukkit.event.block.BlockDispenseEvent event) {
+        if (isHub(event.getBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
     private static long key(Block block) {
         return ((long) block.getX() & 0x3FFFFFFL) << 38
                 | ((long) block.getZ() & 0x3FFFFFFL) << 12
