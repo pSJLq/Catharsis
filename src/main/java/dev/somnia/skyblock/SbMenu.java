@@ -109,7 +109,7 @@ final class SbMenu implements Listener, CommandExecutor {
 
     /**
      * Slot 9 (index 8) always belongs to the star: puts it there, moves any other item out of that slot into a
-     * free slot (or drops it at the player's feet if the bag is full) and removes duplicates elsewhere.
+     * free slot (or the stash, once the bag write lands) and removes duplicates elsewhere.
      * With the star turned off in settings the slot stays empty but still reserved.
      */
     void give(Player player) {
@@ -128,11 +128,51 @@ final class SbMenu implements Listener, CommandExecutor {
             player.getInventory().setItemInOffHand(null);
         }
         ItemStack intruder = player.getInventory().getItem(STAR_SLOT);
-        if (intruder != null && !intruder.getType().isAir() && !isStar(plugin, intruder)) {
+        // The chain bag has not loaded yet: leave the item. paint() calls give() again once it has.
+        boolean bagReady = plugin.words() == null || plugin.words().ready(player);
+        if (bagReady && intruder != null && !intruder.getType().isAir() && !isStar(plugin, intruder)) {
             // Hold the slot with the star while the intruder is re-added, so it can only land elsewhere.
+            // Slot 8 is not chain data. The move is signed with the bag; overflow is stashed only after
+            // that write lands, and a full rollback gives the stack back once on the next tick.
             player.getInventory().setItem(STAR_SLOT, star());
-            for (ItemStack left : player.getInventory().addItem(intruder).values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            if (plugin.words() != null) {
+                String key = HoldItems.keyOf(intruder, plugin);
+                int qty = intruder.getAmount();
+                if (key == null || qty <= 0) {
+                    // Not a bag item. A later paint would delete it, so it leaves as a drop once.
+                    player.getWorld().dropItemNaturally(player.getLocation(), intruder.clone());
+                } else {
+                    Map<Integer, ItemStack> over = player.getInventory().addItem(intruder.clone());
+                    Map<String, Integer> later = new java.util.LinkedHashMap<>();
+                    for (ItemStack left : over.values()) {
+                        if (left == null || left.getType().isAir() || left.getAmount() <= 0) {
+                            continue;
+                        }
+                        String leftKey = HoldItems.keyOf(left, plugin);
+                        if (leftKey == null) {
+                            player.getWorld().dropItemNaturally(player.getLocation(), left);
+                        } else {
+                            later.merge(leftKey, left.getAmount(), Integer::sum);
+                        }
+                    }
+                    if (!later.isEmpty()) {
+                        player.sendMessage(Component.text("Your bag is full: that item goes to your stash. /bz claim", NamedTextColor.YELLOW));
+                    }
+                    java.util.UUID id = player.getUniqueId();
+                    plugin.words().commitLocal(player, ok -> {
+                        if (ok) {
+                            later.forEach((k, n) -> plugin.market().giveOrStash(id, k, n, true));
+                        } else {
+                            // The failure path paints the last signed bag after this hook, and that bag
+                            // does not contain this slot. Give it back on the next tick, once.
+                            plugin.getServer().getScheduler().runTask(plugin, () -> plugin.market().giveOrStash(id, key, qty, true));
+                        }
+                    });
+                }
+            } else {
+                for (ItemStack left : player.getInventory().addItem(intruder).values()) {
+                    player.getWorld().dropItemNaturally(player.getLocation(), left);
+                }
             }
         }
         if (profile.menuItemOff) {
