@@ -1276,6 +1276,7 @@ final class HubManager implements Listener {
                     m.setPersistent(false);
                     m.setSlowWhenEmpty(true);
                     m.setMaxSpeed(0.0);
+                    m.setInvulnerable(true);
                     m.addScoreboardTag("sb-cart");
                 });
                 spawned.put(key, cart.getUniqueId());
@@ -2297,6 +2298,167 @@ final class HubManager implements Listener {
     public void onGuardPhysics(org.bukkit.event.block.BlockPhysicsEvent event) {
         Material physType = event.getBlock().getType();
         if (isHub(event.getBlock().getWorld()) && (physType.hasGravity() || physType == Material.NETHER_PORTAL)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * Decorative hub entities (Gate minecarts, boats, frames, stands, paintings, crystals, holograms).
+     * Combat mobs and NPC bodies have their own handlers and must stay hittable / clickable.
+     */
+    private static boolean hubProp(Entity entity) {
+        if (entity == null || entity instanceof Player) {
+            return false;
+        }
+        if (entity.getScoreboardTags().contains(Npcs.TAG) || entity.getScoreboardTags().contains(Mobs.TAG)) {
+            return false;
+        }
+        return entity instanceof org.bukkit.entity.Vehicle
+                || entity instanceof org.bukkit.entity.Hanging
+                || entity instanceof org.bukkit.entity.ArmorStand
+                || entity instanceof org.bukkit.entity.EnderCrystal
+                || entity instanceof Display;
+    }
+
+    private boolean hubNpc(Entity entity) {
+        return entity.getScoreboardTags().contains(Npcs.TAG) || npcByEntity.containsKey(entity.getUniqueId());
+    }
+
+    /** Future ride attractions can opt in with sb-ride; decorative carts must not be entered. */
+    private static boolean designedRide(Entity entity) {
+        return entity.getScoreboardTags().contains("sb-ride");
+    }
+
+    private static boolean hubCreative(Entity actor) {
+        return actor instanceof Player player && player.getGameMode() == org.bukkit.GameMode.CREATIVE;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardEntityHurt(EntityDamageEvent event) {
+        Entity hurt = event.getEntity();
+        if (!isHub(hurt.getWorld()) || hurt instanceof Player || hubNpc(hurt) || hurt instanceof Villager) {
+            return;
+        }
+        if (hurt.getScoreboardTags().contains(Mobs.TAG)) {
+            return;
+        }
+        if (hubProp(hurt)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onGuardSwing(io.papermc.paper.event.player.PrePlayerAttackEntityEvent event) {
+        Entity attacked = event.getAttacked();
+        if (!guarded(event.getPlayer(), attacked.getWorld()) || hubNpc(attacked)
+                || attacked.getScoreboardTags().contains(Mobs.TAG) || attacked instanceof Player) {
+            return;
+        }
+        if (hubProp(attacked)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardVehicleDamage(org.bukkit.event.vehicle.VehicleDamageEvent event) {
+        if (isHub(event.getVehicle().getWorld()) && !hubCreative(event.getAttacker())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardVehicleDestroy(org.bukkit.event.vehicle.VehicleDestroyEvent event) {
+        if (isHub(event.getVehicle().getWorld()) && !hubCreative(event.getAttacker())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardVehicleEnter(org.bukkit.event.vehicle.VehicleEnterEvent event) {
+        if (!isHub(event.getVehicle().getWorld()) || !(event.getEntered() instanceof Player player)) {
+            return;
+        }
+        if (guarded(player, event.getVehicle().getWorld()) && !designedRide(event.getVehicle())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardMount(org.bukkit.event.entity.EntityMountEvent event) {
+        if (!(event.getEntity() instanceof Player player) || !guarded(player, event.getMount().getWorld())) {
+            return;
+        }
+        if (hubProp(event.getMount()) && !designedRide(event.getMount())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardHanging(org.bukkit.event.hanging.HangingBreakEvent event) {
+        if (!isHub(event.getEntity().getWorld())) {
+            return;
+        }
+        if (event instanceof org.bukkit.event.hanging.HangingBreakByEntityEvent by && hubCreative(by.getRemover())) {
+            return;
+        }
+        event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardStand(org.bukkit.event.player.PlayerArmorStandManipulateEvent event) {
+        if (guarded(event.getPlayer(), event.getRightClicked().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardFrameChange(io.papermc.paper.event.player.PlayerItemFrameChangeEvent event) {
+        if (guarded(event.getPlayer(), event.getItemFrame().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardEntityUse(PlayerInteractEntityEvent event) {
+        Entity target = event.getRightClicked();
+        if (!guarded(event.getPlayer(), target.getWorld()) || hubNpc(target) || target instanceof Player) {
+            return;
+        }
+        if (hubProp(target) || target.getScoreboardTags().contains(Mobs.TAG) || target instanceof org.bukkit.entity.LivingEntity) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardEntityUseAt(org.bukkit.event.player.PlayerInteractAtEntityEvent event) {
+        Entity target = event.getRightClicked();
+        if (!guarded(event.getPlayer(), target.getWorld()) || hubNpc(target) || target instanceof Player) {
+            return;
+        }
+        if (hubProp(target) || target.getScoreboardTags().contains(Mobs.TAG) || target instanceof org.bukkit.entity.LivingEntity) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPropDeath(org.bukkit.event.entity.EntityDeathEvent event) {
+        Entity entity = event.getEntity();
+        if (isHub(entity.getWorld()) && hubProp(entity)) {
+            event.getDrops().clear();
+            event.setDroppedExp(0);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardPropDrop(org.bukkit.event.entity.ItemSpawnEvent event) {
+        if (!isHub(event.getEntity().getWorld())) {
+            return;
+        }
+        Material type = event.getEntity().getItemStack().getType();
+        String name = type.name();
+        if (name.contains("MINECART") || name.contains("BOAT") || name.endsWith("_RAFT")
+                || type == Material.ARMOR_STAND || type == Material.ITEM_FRAME || type == Material.GLOW_ITEM_FRAME
+                || type == Material.PAINTING || type == Material.END_CRYSTAL || type == Material.LEAD) {
             event.setCancelled(true);
         }
     }
