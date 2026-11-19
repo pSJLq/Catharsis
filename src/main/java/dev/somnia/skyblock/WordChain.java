@@ -21,7 +21,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockCookEvent;
+import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
@@ -784,6 +787,44 @@ final class WordChain implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSnapHangingBreak(HangingBreakEvent event) {
         if (snapLocksEntity(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * A dropper, dispenser or crafter shoots the stack into the world. A campfire that finishes pops the
+     * food as an item. The rollback then puts the snapshot back, so both copies exist. Hold the eject until
+     * the write lands. Furnace smelts stay in the block, which the snapshot already covers.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapDispense(BlockDispenseEvent event) {
+        if (snapLocksBlock(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Armor equip is its own event, not a plain dispense, and still removes the stack from the dispenser. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapDispenseArmor(org.bukkit.event.block.BlockDispenseArmorEvent event) {
+        if (snapLocksBlock(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapCrafter(CrafterCraftEvent event) {
+        if (snapLocksBlock(event.getBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapCook(BlockCookEvent event) {
+        Material type = event.getBlock().getType();
+        if (type != Material.CAMPFIRE && type != Material.SOUL_CAMPFIRE) {
+            return;
+        }
+        if (snapLocksBlock(event.getBlock())) {
             event.setCancelled(true);
         }
     }
