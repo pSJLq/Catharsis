@@ -933,6 +933,38 @@ final class WordChain implements Listener {
         tellHeld(event.getPlayer());
     }
 
+    /**
+     * Honeycomb and pumpkin seeds drop in the world, not into the bag write. The hive shear that started the
+     * snapshot is already armed, so cancelling the shear would make that click do nothing. Keep the shear,
+     * hold the drops, and spawn them only if the write lands. A rollback restores the full hive or pumpkin.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapShearBlock(io.papermc.paper.event.block.PlayerShearBlockEvent event) {
+        WorldSnap snap = blockSnap(event.getBlock());
+        if (snap == null) {
+            return;
+        }
+        java.util.List<ItemStack> drops = event.getDrops();
+        if (drops == null || drops.isEmpty()) {
+            return;
+        }
+        List<ItemStack> held = new ArrayList<>();
+        for (ItemStack drop : drops) {
+            if (drop != null && !drop.getType().isAir() && drop.getAmount() > 0) {
+                held.add(drop.clone());
+            }
+        }
+        if (held.isEmpty()) {
+            return;
+        }
+        try {
+            drops.clear();
+        } catch (UnsupportedOperationException ignored) {
+            return;
+        }
+        snap.withheld.addAll(held);
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapBucketEmpty(PlayerBucketEmptyEvent event) {
         if (!lockedBlock(event.getBlock())) {
@@ -1312,6 +1344,29 @@ final class WordChain implements Listener {
             }
         }
         return false;
+    }
+
+    /** The block snapshot that is still waiting on a bag write, or null. */
+    private WorldSnap blockSnap(Block block) {
+        if (block == null || block.getWorld() == null || !anySnaps()) {
+            return null;
+        }
+        Location loc = block.getLocation();
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snap.kind != WorldSnap.BLOCK || snap.location == null || snap.location.getWorld() == null
+                        || !snap.location.getWorld().equals(loc.getWorld())) {
+                    continue;
+                }
+                if (sameBlock(snap.location, loc)) {
+                    return snap;
+                }
+            }
+        }
+        return null;
     }
 
     private boolean snapLocksBlock(Block block) {
