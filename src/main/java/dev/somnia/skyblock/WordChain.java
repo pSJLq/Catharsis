@@ -2616,6 +2616,18 @@ final class WordChain implements Listener {
             return new WorldSnap(SPAWNED, "n:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
         }
 
+        /** Entity ItemSync snapshotted because placing it took an item out of the bag. Tagged stands are minions and NPC labels. */
+        private static boolean placedFromBag(Entity found) {
+            if (found instanceof ArmorStand stand && !stand.getScoreboardTags().isEmpty()) {
+                return false;
+            }
+            return found instanceof ItemFrame
+                    || found instanceof ArmorStand
+                    || found instanceof org.bukkit.entity.Vehicle
+                    || found instanceof org.bukkit.entity.EnderCrystal
+                    || found instanceof org.bukkit.entity.Hanging;
+        }
+
         void restore(WordChain words, UUID playerId) {
             if (kind == CONTAINER && location != null && location.getWorld() != null) {
                 if (!(location.getBlock().getState() instanceof Container container)) {
@@ -2657,7 +2669,13 @@ final class WordChain implements Listener {
             }
             if (kind == SPAWNED && entity != null) {
                 Entity found = Bukkit.getEntity(entity);
-                if (found != null && (found instanceof ItemFrame || found instanceof ArmorStand)) {
+                // Placed from the bag: a failed write put the item back, so the entity must go too.
+                // Frames and untagged stands were already covered. Boats, minecarts, crystals and paintings
+                // were snapshotted by ItemSync and then left in the world (the item and the entity).
+                if (found != null && placedFromBag(found)) {
+                    if (found instanceof org.bukkit.inventory.InventoryHolder holder) {
+                        holder.getInventory().clear();
+                    }
                     found.remove();
                 }
             }
