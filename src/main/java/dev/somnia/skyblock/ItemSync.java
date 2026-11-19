@@ -309,6 +309,9 @@ final class ItemSync implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onLeashed(PlayerLeashEntityEvent event) {
+        if (plugin.words() != null && chainBag(event.getPlayer())) {
+            plugin.words().rememberLeash(event.getPlayer(), event.getEntity());
+        }
         sync(event.getPlayer());
     }
 

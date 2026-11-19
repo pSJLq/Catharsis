@@ -13,6 +13,7 @@ import org.bukkit.block.Container;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemFrame;
+import org.bukkit.entity.LeashHitch;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
@@ -26,6 +27,7 @@ import org.bukkit.event.block.BlockDispenseEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityUnleashEvent;
 import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -51,6 +53,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import io.papermc.paper.entity.Leashable;
 import org.web3j.abi.EventEncoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.Address;
@@ -98,6 +101,8 @@ final class WordChain implements Listener {
     private final Set<UUID> painting = ConcurrentHashMap.newKeySet();
     /** Ender-chest snapshots to restore on the next login if the write rolled back while the player was offline. */
     private final Map<UUID, ItemStack[]> pendingEnder = new ConcurrentHashMap<>();
+    /** Set while a rollback removes a leash, so the knot does not drop a second lead. */
+    private boolean suppressLeadDrop;
     private final String forgedTopic;
     private static final EquipmentSlot[] STAND_SLOTS = {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET, EquipmentSlot.HAND, EquipmentSlot.OFF_HAND
@@ -786,8 +791,27 @@ final class WordChain implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSnapHangingBreak(HangingBreakEvent event) {
+        if (snapLocksEntity(event.getEntity()) || hitchLeashesSnap(event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * Breaking the knot while the lead's bag write can still roll back would drop a lead and then return one
+     * to the bag. Keep the leash until the write lands. A rollback clears it with no drop.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapUnleash(EntityUnleashEvent event) {
         if (snapLocksEntity(event.getEntity())) {
             event.setCancelled(true);
+        }
+    }
+
+    /** Runs last so a rollback's clear cannot be turned back into a dropped lead. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    public void onSnapUnleashDrop(EntityUnleashEvent event) {
+        if (suppressLeadDrop) {
+            event.setDropLeash(false);
         }
     }
 
@@ -934,6 +958,28 @@ final class WordChain implements Listener {
             }
             for (WorldSnap snap : seat.snaps) {
                 if (id.equals(snap.entity)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The fence knot of a leash whose bag write can still roll back. */
+    private boolean hitchLeashesSnap(Entity hitch) {
+        if (!(hitch instanceof LeashHitch) || !anySnaps()) {
+            return false;
+        }
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snap.kind != WorldSnap.LEASH || snap.entity == null) {
+                    continue;
+                }
+                Entity mob = Bukkit.getEntity(snap.entity);
+                if (mob instanceof Leashable leashable && leashable.isLeashed() && hitch.equals(leashable.getLeashHolder())) {
                     return true;
                 }
             }
@@ -2791,6 +2837,18 @@ final class WordChain implements Listener {
         rememberSnap(seat, WorldSnap.spawned(entity));
     }
 
+    /** The mob that just took a lead. A full rollback clears the leash without dropping another one. */
+    void rememberLeash(Player player, Entity entity) {
+        if (!(entity instanceof Leashable) || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.leash(entity));
+    }
+
     /**
      * Lectern, jukebox, bookshelf, pot, campfire, composter, flower pot, hive, anchor, bucket and harvest.
      * The first click of a pending write remembers the block. A full rollback puts that block back, so the
@@ -2850,8 +2908,10 @@ final class WordChain implements Listener {
         static final int ENDER = 1;
         static final int FRAME = 2;
         static final int STAND = 3;
-        static final int SPAWNED = 4;
-        static final int BLOCK = 5;
+        /** Before SPAWNED, so a rolled-back place unleashes before the entity is removed. */
+        static final int LEASH = 4;
+        static final int SPAWNED = 5;
+        static final int BLOCK = 6;
         final int kind;
         final String key;
         final Location location;
@@ -2910,6 +2970,10 @@ final class WordChain implements Listener {
 
         static WorldSnap spawned(Entity entity) {
             return new WorldSnap(SPAWNED, "n:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
+        }
+
+        static WorldSnap leash(Entity entity) {
+            return new WorldSnap(LEASH, "l:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
         }
 
         /**
@@ -3019,6 +3083,22 @@ final class WordChain implements Listener {
                         camp.setItem(i, items[i] == null ? null : items[i].clone());
                     }
                     camp.update(true, false);
+                }
+                return;
+            }
+            if (kind == LEASH && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof Leashable leashable && leashable.isLeashed()) {
+                    Entity holder = leashable.getLeashHolder();
+                    words.suppressLeadDrop = true;
+                    try {
+                        leashable.setLeashHolder(null);
+                        if (holder instanceof LeashHitch hitch && hitch.isValid()) {
+                            hitch.remove();
+                        }
+                    } finally {
+                        words.suppressLeadDrop = false;
+                    }
                 }
                 return;
             }
