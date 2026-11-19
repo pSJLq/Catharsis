@@ -450,6 +450,42 @@ final class Visits implements Listener {
         }
     }
 
+    /** Reeling a frame, cart, animal or ground item. Catching a fish is not an edit. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onFish(org.bukkit.event.player.PlayerFishEvent event) {
+        if (event.getState() != org.bukkit.event.player.PlayerFishEvent.State.CAUGHT_ENTITY || event.getCaught() == null) {
+            return;
+        }
+        if (!mayEdit(event.getPlayer(), event.getCaught().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onShear(org.bukkit.event.player.PlayerShearEntityEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onBucketEntity(org.bukkit.event.player.PlayerBucketEntityEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onLeash(org.bukkit.event.entity.PlayerLeashEntityEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         end(event.getPlayer());

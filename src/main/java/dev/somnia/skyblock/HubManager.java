@@ -2609,6 +2609,61 @@ final class HubManager implements Listener {
         }
     }
 
+    /** A fishing rod reels minecarts, boats, frames and ground items. Catching a fish stays allowed. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardFish(org.bukkit.event.player.PlayerFishEvent event) {
+        if (event.getState() != org.bukkit.event.player.PlayerFishEvent.State.CAUGHT_ENTITY) {
+            return;
+        }
+        if (guarded(event.getPlayer(), event.getPlayer().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardShear(org.bukkit.event.player.PlayerShearEntityEvent event) {
+        if (guarded(event.getPlayer(), event.getEntity().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardBucketEntity(org.bukkit.event.player.PlayerBucketEntityEvent event) {
+        if (guarded(event.getPlayer(), event.getEntity().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardLeash(org.bukkit.event.entity.PlayerLeashEntityEvent event) {
+        if (guarded(event.getPlayer(), event.getEntity().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Hoppers and hopper carts must not pull framed items, discs or chest contents into a closed inventory. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardHopperMove(org.bukkit.event.inventory.InventoryMoveItemEvent event) {
+        if (hubInventory(event.getSource()) || hubInventory(event.getDestination())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardHopperPickup(org.bukkit.event.inventory.InventoryPickupItemEvent event) {
+        if (hubInventory(event.getInventory())) {
+            event.setCancelled(true);
+        }
+    }
+
+    private boolean hubInventory(org.bukkit.inventory.Inventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+        Location loc = inventory.getLocation();
+        return loc != null && loc.getWorld() != null && isHub(loc.getWorld());
+    }
+
     private static long key(Block block) {
         return ((long) block.getX() & 0x3FFFFFFL) << 38
                 | ((long) block.getZ() & 0x3FFFFFFL) << 12
