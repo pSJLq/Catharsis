@@ -2562,7 +2562,7 @@ final class HubManager implements Listener {
             return true;
         }
         return n.endsWith("SHULKER_BOX") || n.endsWith("CANDLE_CAKE") || n.startsWith("POTTED_")
-                || n.endsWith("_CAULDRON");
+                || n.endsWith("_CAULDRON") || n.endsWith("_SHELF");
     }
 
     /** Axe-strip, shovel path, hoe-till, flint and steel: they rewrite protected hub blocks. */

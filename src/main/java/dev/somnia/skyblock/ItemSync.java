@@ -213,8 +213,9 @@ final class ItemSync implements Listener {
 
     /**
      * Uses that move an item between the bag and the world, same class as a frame. With too little gas the write
-     * rolls the bag back and the block keeps the book, disc, pot item or grown crop. Wait instead, and snapshot
-     * the block so a later non-gas failure puts it back.
+     * rolls the bag back and the block keeps the book, disc, pot item, shelf stack or grown crop. Wait instead,
+     * and snapshot the block so a later non-gas failure puts it back. A powered shelf swaps the menu slot, so
+     * that click is refused and the shelf stays one item at a time.
      */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onStore(PlayerInteractEvent event) {
@@ -222,6 +223,20 @@ final class ItemSync implements Listener {
             return;
         }
         Block block = event.getClickedBlock();
+        // A powered shelf swaps the rightmost hotbar slots, and one of those is the menu slot,
+        // which is not bag data. An unpowered click while that slot is selected does the same.
+        if (shelf(block.getType())) {
+            Player player = event.getPlayer();
+            if (poweredShelf(block) || player.getInventory().getHeldItemSlot() == SbMenu.STAR_SLOT) {
+                event.setCancelled(true);
+                if (event.getHand() == EquipmentSlot.HAND) {
+                    player.sendActionBar(Component.text(poweredShelf(block)
+                            ? "A powered shelf swaps the menu slot. Turn the redstone off and move one item at a time."
+                            : "That hotbar slot is the menu. Choose another slot.", NamedTextColor.YELLOW));
+                }
+                return;
+            }
+        }
         org.bukkit.inventory.ItemStack hand = event.getItem();
         if (hand != null && hand.getType() == Material.BONE_MEAL) {
             if (denyGas(event, event.getPlayer())) {
@@ -369,6 +384,10 @@ final class ItemSync implements Listener {
         if (type == Material.FLOWER_POT) {
             return !empty;
         }
+        // A shelf swaps the hand with one displayed stack. A block item is not a block place.
+        if (shelf(type)) {
+            return !empty || shelfHolds(block);
+        }
         if ((type == Material.BEEHIVE || type == Material.BEE_NEST)
                 && (held == Material.GLASS_BOTTLE || held == Material.SHEARS)
                 && block.getBlockData() instanceof org.bukkit.block.data.type.Beehive hive) {
@@ -377,6 +396,27 @@ final class ItemSync implements Listener {
         if (type == Material.RESPAWN_ANCHOR && held == Material.GLOWSTONE
                 && block.getBlockData() instanceof org.bukkit.block.data.type.RespawnAnchor anchor) {
             return anchor.getCharges() < anchor.getMaximumCharges();
+        }
+        return false;
+    }
+
+    /** Oak shelf, poplar shelf, and the rest of the wood set. Not a chiseled bookshelf. */
+    private static boolean shelf(Material type) {
+        return type != null && type.name().endsWith("_SHELF");
+    }
+
+    private static boolean poweredShelf(Block block) {
+        return block.getBlockData() instanceof org.bukkit.block.data.Powerable power && power.isPowered();
+    }
+
+    private static boolean shelfHolds(Block block) {
+        if (!(block.getState() instanceof org.bukkit.inventory.InventoryHolder holder)) {
+            return false;
+        }
+        for (org.bukkit.inventory.ItemStack stack : holder.getInventory().getContents()) {
+            if (stack != null && !stack.getType().isAir() && stack.getAmount() > 0) {
+                return true;
+            }
         }
         return false;
     }
@@ -423,7 +463,9 @@ final class ItemSync implements Listener {
         Block clicked = event.getClickedBlock();
         boolean composter = clicked != null && clicked.getType() == Material.COMPOSTER;
         org.bukkit.inventory.ItemStack hand = event.getItem();
-        if (!composter && hand != null && hand.getType().isBlock()) {
+        // A dirt block on a shelf, or a plant in a pot, leaves the bag without placing a block.
+        boolean stored = clicked != null && storesHeldItem(clicked, hand);
+        if (!composter && !stored && hand != null && hand.getType().isBlock()) {
             return; // block placing has its own signed path (WordChain.onPlace)
         }
         if (!composter && (hand == null || hand.getType().isAir()) && a == Action.RIGHT_CLICK_AIR) {
