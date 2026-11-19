@@ -61,7 +61,15 @@ final class ItemSync implements Listener {
 
     /** Next tick (after vanilla applied the use), sign the live bag once. */
     void sync(Player player) {
-        if (!chainBag(player) || !queued.add(player.getUniqueId())) {
+        if (!chainBag(player)) {
+            return;
+        }
+        // Arm before the queue check. A leash, frame or lectern snap must lock breaks in this tick.
+        // The following commit still waits until next tick, after vanilla has applied the use.
+        if (plugin.words() != null) {
+            plugin.words().armSnaps(player);
+        }
+        if (!queued.add(player.getUniqueId())) {
             return;
         }
         plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -426,6 +434,18 @@ final class ItemSync implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityUse(PlayerInteractEntityEvent event) {
+        // A frame place/take and an armor-stand swap fire a second event after this one.
+        // Arming the snapshot here would cancel that second event and the use would never apply.
+        org.bukkit.entity.Entity target = event.getRightClicked();
+        if (target instanceof org.bukkit.entity.ItemFrame || target instanceof org.bukkit.entity.ArmorStand) {
+            return;
+        }
+        sync(event.getPlayer());
+    }
+
+    /** After the frame actually took or returned the item, lock it until the bag write lands. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onFrameChanged(io.papermc.paper.event.player.PlayerItemFrameChangeEvent event) {
         sync(event.getPlayer());
     }
 

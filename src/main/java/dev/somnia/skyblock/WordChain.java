@@ -24,9 +24,15 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockCookEvent;
 import org.bukkit.event.block.BlockDispenseEvent;
+import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.block.BlockFromToEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDropItemEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityUnleashEvent;
 import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
@@ -36,11 +42,19 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
+import org.bukkit.event.player.PlayerBucketEmptyEvent;
+import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerHarvestBlockEvent;
+import org.bukkit.event.player.PlayerInteractAtEntityEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.player.PlayerTakeLecternBookEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
+import io.papermc.paper.event.player.PlayerItemFrameChangeEvent;
 import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.Inventory;
@@ -853,6 +867,202 @@ final class WordChain implements Listener {
         }
     }
 
+    /**
+     * The snapshot is the block before the book, disc, pot item or crop change. Breaking it, pushing it or
+     * letting water eat it drops that item, and a full rollback puts the snapshot back too (a second copy).
+     * Runs before the snapshot is taken, so the click that starts the write is not cancelled.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapBreak(BlockBreakEvent event) {
+        if (!lockedBlock(event.getBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapInteract(PlayerInteractEvent event) {
+        Block block = event.getClickedBlock();
+        if (block == null) {
+            return;
+        }
+        Action action = event.getAction();
+        boolean physical = action == Action.PHYSICAL;
+        if (!physical && action != Action.RIGHT_CLICK_BLOCK && action != Action.LEFT_CLICK_BLOCK) {
+            return;
+        }
+        // Trample hits the farmland under a snapshotted crop.
+        boolean locked = lockedBlock(block) || (physical && lockedBlock(block.getRelative(BlockFace.UP)));
+        if (!locked) {
+            return;
+        }
+        event.setCancelled(true);
+        if (!physical) {
+            tellHeld(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapLectern(PlayerTakeLecternBookEvent event) {
+        if (!lockedBlock(event.getLectern().getBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapHarvest(PlayerHarvestBlockEvent event) {
+        if (!lockedBlock(event.getHarvestedBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapBucketEmpty(PlayerBucketEmptyEvent event) {
+        if (!lockedBlock(event.getBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapBucketFill(PlayerBucketFillEvent event) {
+        if (!lockedBlock(event.getBlock())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapPiston(BlockPistonExtendEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        if (lockedBlock(event.getBlock()) || event.getBlocks().stream().anyMatch(this::lockedBlock)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapPistonRetract(BlockPistonRetractEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        if (lockedBlock(event.getBlock()) || event.getBlocks().stream().anyMatch(this::lockedBlock)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapExplode(EntityExplodeEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        event.blockList().removeIf(this::lockedBlock);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapBlockExplode(BlockExplodeEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        event.blockList().removeIf(this::lockedBlock);
+    }
+
+    /** Water into a snapshotted crop or lectern. The source the player just placed still flows elsewhere. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapFlow(BlockFromToEvent event) {
+        if (lockedBlock(event.getToBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * A second click on a chest boat, minecart or animal can take the chest off. The inventory shrinks,
+     * the cargo drops, and the size check then skips the rollback (bag copy and ground copy).
+     * The click that took the snapshot is earlier than this priority, so it still applies.
+     * A plain rearrange of the bag, with the carrier open, does not touch it and stays allowed.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapCarrierClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player) || !carrierClickLocked(event)) {
+            return;
+        }
+        event.setCancelled(true);
+        tellSaving(player);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapCarrierDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player) || !carrierDragLocked(event)) {
+            return;
+        }
+        event.setCancelled(true);
+        tellSaving(player);
+    }
+
+    /**
+     * Taking the chest off a llama or donkey drops the cargo after the click. Hold those drops with the
+     * snapshot: a failed write puts the chest back, a landed write drops them once.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapCarrierDrop(EntityDropItemEvent event) {
+        if (!snapLocksEntity(event.getEntity())) {
+            return;
+        }
+        WorldSnap snap = carrierSnap(event.getEntity());
+        ItemStack stack = event.getItemDrop().getItemStack();
+        if (snap == null || stack == null || stack.getType().isAir()) {
+            return;
+        }
+        snap.withheld.add(stack.clone());
+        event.setCancelled(true);
+    }
+
+    /**
+     * Place, take and rotate. The snapshot is taken on the interact, and the lock arms on this event's
+     * monitor, so the change that started the write still applies. A later click waits.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapFrameTake(PlayerItemFrameChangeEvent event) {
+        if (!snapLocksEntity(event.getItemFrame())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapFrameUse(PlayerInteractEntityEvent event) {
+        if (snapLocksEntity(event.getRightClicked())) {
+            event.setCancelled(true);
+            tellHeld(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapFrameUseAt(PlayerInteractAtEntityEvent event) {
+        if (snapLocksEntity(event.getRightClicked())) {
+            event.setCancelled(true);
+            tellHeld(event.getPlayer());
+        }
+    }
+
+    /** Same timing as a frame: the swap that took the snapshot is not locked yet; the next one is. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapStandUse(PlayerArmorStandManipulateEvent event) {
+        if (snapLocksEntity(event.getRightClicked())) {
+            event.setCancelled(true);
+            tellHeld(event.getPlayer());
+        }
+    }
+
     private boolean worldContainer(Player player, Inventory top) {
         if (top == null || top.getHolder() instanceof Menu || plugin.hold().offchain(player)) {
             return false;
@@ -872,6 +1082,73 @@ final class WordChain implements Listener {
 
     private void tellSaving(Player player) {
         player.sendActionBar(Component.text("That container is being saved. Wait a moment.", NamedTextColor.YELLOW));
+    }
+
+    private void tellHeld(Player player) {
+        if (player != null) {
+            player.sendActionBar(Component.text("That is being saved. Wait a moment.", NamedTextColor.YELLOW));
+        }
+    }
+
+    /** True when a rollback snapshot already covers this block. The click that creates the snapshot is not locked yet. */
+    private boolean lockedBlock(Block block) {
+        return block != null && anySnaps() && snapLocksBlock(block);
+    }
+
+    /** Chest boat, minecart or animal chest whose rollback is still open. */
+    private boolean carrierLocked(Inventory inventory) {
+        if (inventory == null || !anySnaps()) {
+            return false;
+        }
+        InventoryHolder holder = inventory.getHolder();
+        return holder instanceof Entity entity && !(entity instanceof Player) && snapLocksEntity(entity);
+    }
+
+    /** Shift-click and any click in the carrier. A bag-only click does not change the carrier. */
+    private boolean carrierClickLocked(InventoryClickEvent event) {
+        Inventory top = event.getView().getTopInventory();
+        if (!carrierLocked(top)) {
+            return false;
+        }
+        Inventory clicked = event.getClickedInventory();
+        if (clicked != null && clicked.equals(top)) {
+            return true;
+        }
+        return event.isShiftClick()
+                || event.getAction() == org.bukkit.event.inventory.InventoryAction.MOVE_TO_OTHER_INVENTORY
+                || event.getAction() == org.bukkit.event.inventory.InventoryAction.COLLECT_TO_CURSOR;
+    }
+
+    private boolean carrierDragLocked(InventoryDragEvent event) {
+        Inventory top = event.getView().getTopInventory();
+        if (!carrierLocked(top)) {
+            return false;
+        }
+        int topSize = top.getSize();
+        for (int raw : event.getRawSlots()) {
+            if (raw < topSize) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private WorldSnap carrierSnap(Entity entity) {
+        if (entity == null || !anySnaps()) {
+            return null;
+        }
+        UUID id = entity.getUniqueId();
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snap.kind == WorldSnap.CONTAINER && id.equals(snap.entity)) {
+                    return snap;
+                }
+            }
+        }
+        return null;
     }
 
     /** Snapshot is only enforced while a bag write can still roll it back. A cancelled click must not freeze hoppers. */
@@ -2837,6 +3114,22 @@ final class WordChain implements Listener {
         rememberSnap(seat, WorldSnap.spawned(entity));
     }
 
+    /**
+     * A leash, frame or block snapshot must hold breaks and hoppers in this tick. Waiting for the next
+     * tick's commit left a window where the knot or the lectern could be broken and the rollback
+     * then put a second copy in the bag.
+     */
+    void armSnaps(Player player) {
+        if (player == null || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded || seat.snaps.isEmpty()) {
+            return;
+        }
+        seat.trustLocal = true;
+    }
+
     /** The mob that just took a lead. A full rollback clears the leash without dropping another one. */
     void rememberLeash(Player player, Entity entity) {
         if (!(entity instanceof Leashable) || plugin.hold().offchain(player)) {
@@ -2878,6 +3171,9 @@ final class WordChain implements Listener {
     }
 
     private void dropSnaps(Seat seat) {
+        for (WorldSnap snap : seat.snaps) {
+            snap.releaseWithheld();
+        }
         seat.snaps.clear();
     }
 
@@ -2919,6 +3215,8 @@ final class WordChain implements Listener {
         final UUID owner;
         final ItemStack[] items;
         final String data;
+        /** Cargo a chested animal dropped while this snapshot can still roll back. Spawned only if the write lands. */
+        final List<ItemStack> withheld = new ArrayList<>();
 
         private WorldSnap(int kind, String key, Location location, UUID entity, UUID owner, ItemStack[] items) {
             this(kind, key, location, entity, owner, items, null);
@@ -3011,14 +3309,51 @@ final class WordChain implements Listener {
                     || found instanceof org.bukkit.entity.Hanging;
         }
 
+        /** Cargo held back from a chest unequip. A landed write drops it once; a rollback puts it in the chest instead. */
+        void releaseWithheld() {
+            if (withheld.isEmpty()) {
+                return;
+            }
+            Location at = location;
+            if (entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found != null) {
+                    at = found.getLocation();
+                }
+            }
+            if (at != null && at.getWorld() != null) {
+                for (ItemStack stack : withheld) {
+                    if (stack != null && !stack.getType().isAir()) {
+                        at.getWorld().dropItemNaturally(at, stack.clone());
+                    }
+                }
+            }
+            withheld.clear();
+        }
+
         void restore(WordChain words, UUID playerId) {
             if (kind == CONTAINER && entity != null) {
                 Entity found = Bukkit.getEntity(entity);
+                if (found == null) {
+                    releaseWithheld();
+                    return;
+                }
                 if (found instanceof InventoryHolder holder && items != null) {
+                    // Unequipping the chest shrinks the inventory, which used to skip the restore and leave the drops.
+                    if (found instanceof org.bukkit.entity.ChestedHorse horse
+                            && !horse.isCarryingChest()
+                            && items.length > horse.getInventory().getSize()) {
+                        horse.setCarryingChest(true);
+                    }
                     Inventory inv = holder.getInventory();
                     if (inv.getSize() == items.length) {
                         inv.setContents(cloneContents(items));
+                        withheld.clear();
+                    } else {
+                        releaseWithheld();
                     }
+                } else {
+                    releaseWithheld();
                 }
                 return;
             }
