@@ -388,20 +388,35 @@ final class Visits implements Listener {
         }
     }
 
+    /**
+     * A double chest's holder is {@code DoubleChest}, not a block state. A llama, donkey or horse is not a
+     * vehicle. The click cancel does not always stop the open, so check the inventory itself.
+     */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onOpen(org.bukkit.event.inventory.InventoryOpenEvent event) {
         if (!(event.getPlayer() instanceof Player player)) {
             return;
         }
-        if (!isGuest(player) && mayEdit(player, player.getLocation())) {
+        InventoryHolder holder = event.getInventory().getHolder();
+        if (holder instanceof Menu || holder instanceof Player) {
             return;
         }
-        InventoryHolder holder = event.getInventory().getHolder();
-        if (holder instanceof org.bukkit.block.BlockState || holder instanceof org.bukkit.entity.Vehicle) {
-            if (isGuest(player) || !mayEdit(player, player.getLocation())) {
-                event.setCancelled(true);
-                deny(player);
-            }
+        boolean foreign = holder instanceof org.bukkit.block.BlockState
+                || holder instanceof org.bukkit.block.DoubleChest
+                || holder instanceof org.bukkit.entity.Entity;
+        if (!foreign) {
+            return;
+        }
+        Location at = event.getInventory().getLocation();
+        if (at == null && holder instanceof org.bukkit.entity.Entity entity) {
+            at = entity.getLocation();
+        }
+        if (at == null) {
+            at = player.getLocation();
+        }
+        if (!mayEdit(player, at)) {
+            event.setCancelled(true);
+            deny(player);
         }
     }
 
@@ -496,6 +511,15 @@ final class Visits implements Listener {
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onShear(org.bukkit.event.player.PlayerShearEntityEvent event) {
         if (!mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    /** Shears on a pumpkin or hive. Cancelling the click does not always stop the carve or the honeycomb. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onShearBlock(io.papermc.paper.event.block.PlayerShearBlockEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getBlock().getLocation())) {
             event.setCancelled(true);
             deny(event.getPlayer());
         }

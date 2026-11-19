@@ -2713,6 +2713,14 @@ final class HubManager implements Listener {
         }
     }
 
+    /** A pumpkin carve or a hive shear. The click cancel does not always swallow this event. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onGuardShearBlock(io.papermc.paper.event.block.PlayerShearBlockEvent event) {
+        if (guarded(event.getPlayer(), event.getBlock().getWorld())) {
+            event.setCancelled(true);
+        }
+    }
+
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onGuardBucketEntity(org.bukkit.event.player.PlayerBucketEntityEvent event) {
         if (guarded(event.getPlayer(), event.getEntity().getWorld())) {
