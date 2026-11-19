@@ -366,12 +366,87 @@ final class Visits implements Listener {
             return;
         }
         InventoryHolder holder = event.getInventory().getHolder();
-        if (holder instanceof org.bukkit.block.BlockState || holder instanceof org.bukkit.entity.minecart.StorageMinecart
-                || holder instanceof org.bukkit.entity.minecart.HopperMinecart) {
+        if (holder instanceof org.bukkit.block.BlockState || holder instanceof org.bukkit.entity.Vehicle) {
             if (isGuest(player) || !mayEdit(player, player.getLocation())) {
                 event.setCancelled(true);
                 deny(player);
             }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onHangingBreak(org.bukkit.event.hanging.HangingBreakByEntityEvent event) {
+        Player player = actor(event.getRemover());
+        if (player != null && !mayEdit(player, event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onFrameChange(io.papermc.paper.event.player.PlayerItemFrameChangeEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getItemFrame().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onVehicleDamage(org.bukkit.event.vehicle.VehicleDamageEvent event) {
+        Player player = actor(event.getAttacker());
+        if (player != null && !mayEdit(player, event.getVehicle().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onVehicleDestroy(org.bukkit.event.vehicle.VehicleDestroyEvent event) {
+        Player player = actor(event.getAttacker());
+        if (player != null && !mayEdit(player, event.getVehicle().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onVehicleEnter(org.bukkit.event.vehicle.VehicleEnterEvent event) {
+        if (event.getEntered() instanceof Player player && !mayEdit(player, event.getVehicle().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onMount(org.bukkit.event.entity.EntityMountEvent event) {
+        if (event.getEntity() instanceof Player player && !mayEdit(player, event.getMount().getLocation())) {
+            event.setCancelled(true);
+            deny(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onEntityPlace(org.bukkit.event.entity.EntityPlaceEvent event) {
+        if (event.getPlayer() != null && !mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onHangingPlace(org.bukkit.event.hanging.HangingPlaceEvent event) {
+        if (event.getPlayer() != null && event.getEntity() != null
+                && !mayEdit(event.getPlayer(), event.getEntity().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onHarvest(org.bukkit.event.player.PlayerHarvestBlockEvent event) {
+        if (!mayEdit(event.getPlayer(), event.getHarvestedBlock().getLocation())) {
+            event.setCancelled(true);
+            deny(event.getPlayer());
         }
     }
 
@@ -381,10 +456,14 @@ final class Visits implements Listener {
     }
 
     private static Player damager(EntityDamageByEntityEvent event) {
-        if (event.getDamager() instanceof Player player) {
+        return actor(event.getDamager());
+    }
+
+    private static Player actor(org.bukkit.entity.Entity entity) {
+        if (entity instanceof Player player) {
             return player;
         }
-        if (event.getDamager() instanceof org.bukkit.entity.Projectile projectile
+        if (entity instanceof org.bukkit.entity.Projectile projectile
                 && projectile.getShooter() instanceof Player player) {
             return player;
         }
