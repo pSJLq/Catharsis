@@ -26,6 +26,7 @@ import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
@@ -35,6 +36,7 @@ import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.RecipeChoice;
@@ -689,6 +691,11 @@ final class WordChain implements Listener {
             return;
         }
         Inventory top = event.getView().getTopInventory();
+        if (lockedByOther(player, top)) {
+            event.setCancelled(true);
+            tellSaving(player);
+            return;
+        }
         if (containerGasBlocked(player, top)) {
             event.setCancelled(true);
             tellGas(player);
@@ -703,12 +710,54 @@ final class WordChain implements Listener {
             return;
         }
         Inventory top = event.getView().getTopInventory();
+        if (lockedByOther(player, top)) {
+            event.setCancelled(true);
+            tellSaving(player);
+            return;
+        }
         if (containerGasBlocked(player, top)) {
             event.setCancelled(true);
             tellGas(player);
             return;
         }
         rememberContainer(player, top);
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onSnapOpen(org.bukkit.event.inventory.InventoryOpenEvent event) {
+        if (!(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+        if (lockedByOther(player, event.getInventory())) {
+            event.setCancelled(true);
+            tellSaving(player);
+        }
+    }
+
+    /**
+     * A failed bag write restores the snapshot taken at the first click. A hopper, dropper or second player can move
+     * the items out before that receipt, so the restore puts them back and the bag still has them (a dupe). Hold the
+     * snapshot still until the write lands or is fully rolled back.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapHopper(InventoryMoveItemEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        if (snapLocks(event.getSource()) || snapLocks(event.getDestination())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onSnapHopperSearch(org.bukkit.event.inventory.HopperInventorySearchEvent event) {
+        if (!anySnaps()) {
+            return;
+        }
+        Block search = event.getSearchBlock();
+        if ((event.getInventory() != null && snapLocks(event.getInventory())) || (search != null && snapLocksBlock(search))) {
+            event.setInventory(null);
+        }
     }
 
     private boolean worldContainer(Player player, Inventory top) {
@@ -726,6 +775,128 @@ final class WordChain implements Listener {
         }
         Seat seat = seats.get(player.getUniqueId());
         return seat != null && seat.loaded && plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()));
+    }
+
+    private void tellSaving(Player player) {
+        player.sendActionBar(Component.text("That container is being saved. Wait a moment.", NamedTextColor.YELLOW));
+    }
+
+    /** Snapshot is only enforced while a bag write can still roll it back. A cancelled click must not freeze hoppers. */
+    private static boolean seatWriting(Seat seat) {
+        return seat.bagBusy || seat.task >= 0 || seat.trustLocal || seat.again || seat.trusted != null
+                || !seat.breaks.isEmpty() || !seat.places.isEmpty() || !seat.drops.isEmpty();
+    }
+
+    private boolean anySnaps() {
+        for (Seat seat : seats.values()) {
+            if (!seat.snaps.isEmpty() && seatWriting(seat)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Another player's pending rollback owns this inventory. Their own clicks still go through. */
+    private boolean lockedByOther(Player player, Inventory inventory) {
+        if (player == null || inventory == null || !anySnaps()) {
+            return false;
+        }
+        for (Map.Entry<UUID, Seat> entry : seats.entrySet()) {
+            if (entry.getKey().equals(player.getUniqueId()) || !seatWriting(entry.getValue())) {
+                continue;
+            }
+            for (WorldSnap snap : entry.getValue().snaps) {
+                if (snapMatches(snap, inventory)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean snapLocks(Inventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snapMatches(snap, inventory)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean snapLocksBlock(Block block) {
+        if (block == null || block.getWorld() == null) {
+            return false;
+        }
+        Location loc = block.getLocation();
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snap.location == null || snap.location.getWorld() == null || !snap.location.getWorld().equals(loc.getWorld())) {
+                    continue;
+                }
+                if (sameBlock(snap.location, loc) || linkedChest(snap.location, loc)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean snapMatches(WorldSnap snap, Inventory inventory) {
+        if (snap.kind == WorldSnap.ENDER) {
+            return inventory.getType() == InventoryType.ENDER_CHEST
+                    && inventory.getHolder() instanceof Player holder
+                    && snap.owner != null
+                    && snap.owner.equals(holder.getUniqueId());
+        }
+        if (snap.entity != null && inventory.getHolder() instanceof Entity entity && snap.entity.equals(entity.getUniqueId())) {
+            return true;
+        }
+        Location loc = inventory.getLocation();
+        if (snap.location == null || loc == null || loc.getWorld() == null || snap.location.getWorld() == null
+                || !loc.getWorld().equals(snap.location.getWorld())) {
+            return false;
+        }
+        return sameBlock(snap.location, loc) || linkedChest(snap.location, loc);
+    }
+
+    private static boolean sameBlock(Location a, Location b) {
+        return a.getBlockX() == b.getBlockX() && a.getBlockY() == b.getBlockY() && a.getBlockZ() == b.getBlockZ();
+    }
+
+    /** The other half of a double chest. Hoppers address whichever half they touch. */
+    private static boolean linkedChest(Location snapAt, Location other) {
+        if (snapAt.getWorld() == null || other.getWorld() == null || !snapAt.getWorld().equals(other.getWorld())) {
+            return false;
+        }
+        int dx = Math.abs(snapAt.getBlockX() - other.getBlockX());
+        int dy = Math.abs(snapAt.getBlockY() - other.getBlockY());
+        int dz = Math.abs(snapAt.getBlockZ() - other.getBlockZ());
+        if (dx + dy + dz != 1) {
+            return false;
+        }
+        Block a = snapAt.getBlock();
+        Block b = other.getBlock();
+        Material type = a.getType();
+        if ((type != Material.CHEST && type != Material.TRAPPED_CHEST) || type != b.getType()) {
+            return false;
+        }
+        if (!(a.getState() instanceof org.bukkit.block.Chest ca) || !(b.getState() instanceof org.bukkit.block.Chest cb)) {
+            return false;
+        }
+        InventoryHolder ha = ca.getInventory().getHolder();
+        InventoryHolder hb = cb.getInventory().getHolder();
+        return ha != null && ha.equals(hb);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
