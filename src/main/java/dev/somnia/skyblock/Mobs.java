@@ -31,6 +31,8 @@ import org.bukkit.event.entity.EntityCombustEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.EntityRegainHealthEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
@@ -291,6 +293,72 @@ final class Mobs implements Listener {
         return Long.toString(v);
     }
 
+    // ---------- island mobs: same HP nameplate as hub mobs ----------
+
+    private static final String ISLAND_HP_TAG = "sb_island_hp";
+
+    /** Natural hostiles in the island world, not hub/arena mobs and not ones a player named. */
+    private boolean islandHostile(Entity entity) {
+        if (!(entity instanceof Monster mob) || isMob(mob) || mob.isDead()) {
+            return false;
+        }
+        if (plugin.islands() == null || plugin.islands().world() == null || !mob.getWorld().equals(plugin.islands().world())) {
+            return false;
+        }
+        return mob.customName() == null || mob.getScoreboardTags().contains(ISLAND_HP_TAG);
+    }
+
+    /** Island mobs keep vanilla health; shown on the same 5x scale the server uses for their hits on players. */
+    private void islandName(LivingEntity mob) {
+        if (!mob.isValid() || mob.isDead() || !islandHostile(mob)) {
+            return;
+        }
+        org.bukkit.attribute.AttributeInstance attr = mob.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH);
+        double max = (attr != null ? attr.getValue() : mob.getHealth()) * 5;
+        double hp = Math.max(0, mob.getHealth()) * 5;
+        String title = java.util.Arrays.stream(mob.getType().name().toLowerCase(java.util.Locale.ROOT).split("_"))
+                .map(w -> w.isEmpty() ? w : Character.toUpperCase(w.charAt(0)) + w.substring(1))
+                .collect(java.util.stream.Collectors.joining(" "));
+        Component name = Component.text("[", NamedTextColor.DARK_GRAY)
+                .append(Component.text("Lv1", NamedTextColor.GRAY))
+                .append(Component.text("] ", NamedTextColor.DARK_GRAY))
+                .append(Component.text(title, NamedTextColor.RED))
+                .append(Component.text(" " + compact(hp), hp > max / 2 ? NamedTextColor.GREEN : NamedTextColor.YELLOW))
+                .append(Component.text("/", NamedTextColor.WHITE))
+                .append(Component.text(compact(max), NamedTextColor.GREEN))
+                .append(Component.text("❤", NamedTextColor.RED));
+        mob.addScoreboardTag(ISLAND_HP_TAG);
+        mob.customName(name);
+        mob.setCustomNameVisible(true);
+    }
+
+    private void islandNameLater(Entity entity) {
+        if (entity instanceof LivingEntity mob && islandHostile(mob)) {
+            plugin.getServer().getScheduler().runTask(plugin, () -> islandName(mob));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onIslandSpawn(CreatureSpawnEvent event) {
+        islandNameLater(event.getEntity());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onIslandHurt(EntityDamageEvent event) {
+        islandNameLater(event.getEntity());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onIslandHeal(EntityRegainHealthEvent event) {
+        islandNameLater(event.getEntity());
+    }
+
+    @EventHandler
+    public void onIslandLoad(EntitiesLoadEvent event) {
+        for (Entity entity : event.getEntities()) {
+            islandNameLater(entity);
+        }
+    }
     // ---------- events ----------
 
     @EventHandler(ignoreCancelled = true)

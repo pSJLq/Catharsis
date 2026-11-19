@@ -84,6 +84,8 @@ final class WordChain implements Listener {
 
     private final SomniaSkyblockPlugin plugin;
     private final Map<UUID, Seat> seats = new ConcurrentHashMap<>();
+    /** Drop key (Q / Ctrl+Q) or cursor drop in an open inventory: {source bag slot or -1, tick}. The drop event that follows in the same tick uses it instead of the held slot. */
+    private final Map<UUID, int[]> clickDrops = new ConcurrentHashMap<>();
     private final Set<Long> placed = ConcurrentHashMap.newKeySet();
     private final Set<UUID> painting = ConcurrentHashMap.newKeySet();
     /** Ender-chest snapshots to restore on the next login if the write rolled back while the player was offline. */
@@ -519,6 +521,15 @@ final class WordChain implements Listener {
             return;
         }
         int slot = player.getInventory().getHeldItemSlot();
+        int[] click = clickDrops.remove(player.getUniqueId());
+        if (click != null && click[1] == Bukkit.getCurrentTick()) {
+            if (click[0] < 0) {
+                // Dropped from the cursor or from a slot outside the bag: the server puts it back into the inventory
+                // (the drop is cancelled) and the next layout write records where it went. Never touch the held slot.
+                return;
+            }
+            slot = click[0];
+        }
         int amount = Math.max(1, event.getItemDrop().getItemStack().getAmount());
         if (slot >= 0 && slot < BAG && isAotv(shown(seat)[slot])) {
             tell(player, "The sword stays in the bag.", NamedTextColor.YELLOW);
@@ -650,6 +661,7 @@ final class WordChain implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        clickDrops.remove(player.getUniqueId());
         Seat seat = seats.get(player.getUniqueId());
         if (seat == null) {
             return;
@@ -716,6 +728,22 @@ final class WordChain implements Listener {
         return seat != null && seat.loaded && plugin.wallets().shortOnGas(plugin.profiles().get(player.getUniqueId()));
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDropClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        int source;
+        switch (event.getAction()) {
+            case DROP_ONE_SLOT, DROP_ALL_SLOT -> source = event.getClickedInventory() instanceof org.bukkit.inventory.PlayerInventory own && player.equals(own.getHolder())
+                    && event.getSlot() >= 0 && event.getSlot() < BAG ? event.getSlot() : -1;
+            case DROP_ONE_CURSOR, DROP_ALL_CURSOR -> source = -1;
+            default -> {
+                return;
+            }
+        }
+        clickDrops.put(player.getUniqueId(), new int[] {source, Bukkit.getCurrentTick()});
+    }
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onClick(InventoryClickEvent event) {
         if (event.getWhoClicked() instanceof Player player && !(event.getView().getTopInventory().getHolder() instanceof Menu)) {
