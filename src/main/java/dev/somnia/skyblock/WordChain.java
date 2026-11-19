@@ -1126,6 +1126,19 @@ final class WordChain implements Listener {
      */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSnapCarrierDrop(EntityDropItemEvent event) {
+        // An eye of ender breaks into a ground item. If the bag write fails, the eye is back in the bag
+        // and that ground item would be a second one. Hold it until the write lands.
+        if (event.getEntity() instanceof org.bukkit.entity.EnderSignal) {
+            WorldSnap consumed = consumedSnap(event.getEntity());
+            if (consumed != null) {
+                ItemStack eye = event.getItemDrop().getItemStack();
+                if (eye != null && !eye.getType().isAir()) {
+                    consumed.withheld.add(eye.clone());
+                }
+                event.setCancelled(true);
+                return;
+            }
+        }
         if (!snapLocksEntity(event.getEntity())) {
             return;
         }
@@ -1314,6 +1327,25 @@ final class WordChain implements Listener {
             }
         }
         return false;
+    }
+
+    /** A projectile or mob this seat will remove if the bag item comes back. */
+    private WorldSnap consumedSnap(Entity entity) {
+        if (entity == null || !anySnaps()) {
+            return null;
+        }
+        UUID id = entity.getUniqueId();
+        for (Seat seat : seats.values()) {
+            if (!seatWriting(seat)) {
+                continue;
+            }
+            for (WorldSnap snap : seat.snaps) {
+                if (snap.discard && id.equals(snap.entity)) {
+                    return snap;
+                }
+            }
+        }
+        return null;
     }
 
     private WorldSnap carrierSnap(Entity entity) {
@@ -3555,6 +3587,34 @@ final class WordChain implements Listener {
     }
 
     /**
+     * An arrow, trident, pearl, spawn-egg mob or bucket mob exists because an item left the bag.
+     * A full rollback puts that item back, so the entity has to go too. Tagged combat mobs and NPCs
+     * are never this: a spawn egg did not create them.
+     */
+    void rememberConsumed(Player player, Entity entity) {
+        if (entity == null || entity instanceof Player || plugin.hold().offchain(player)) {
+            return;
+        }
+        if (entity.getScoreboardTags().contains(Npcs.TAG) || entity.getScoreboardTags().contains(Mobs.TAG)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.consumed(entity));
+    }
+
+    /** True while this seat's bag write can still roll the world back. */
+    boolean writing(Player player) {
+        if (player == null) {
+            return false;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        return seat != null && seatWriting(seat);
+    }
+
+    /**
      * A leash, frame or block snapshot must hold breaks and hoppers in this tick. Waiting for the next
      * tick's commit left a window where the knot or the lectern could be broken and the rollback
      * then put a second copy in the bag.
@@ -3655,6 +3715,8 @@ final class WordChain implements Listener {
         final UUID owner;
         final ItemStack[] items;
         final String data;
+        /** A spawned mob or projectile that must disappear if the bag item comes back. */
+        boolean discard;
         /** Cargo a chested animal dropped while this snapshot can still roll back. Spawned only if the write lands. */
         final List<ItemStack> withheld = new ArrayList<>();
 
@@ -3708,6 +3770,13 @@ final class WordChain implements Listener {
 
         static WorldSnap spawned(Entity entity) {
             return new WorldSnap(SPAWNED, "n:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null);
+        }
+
+        /** Same as {@link #spawned}, and a rollback removes it even when it is not a placed boat or frame. */
+        static WorldSnap consumed(Entity entity) {
+            WorldSnap snap = spawned(entity);
+            snap.discard = true;
+            return snap;
         }
 
         static WorldSnap leash(Entity entity) {
@@ -3882,9 +3951,23 @@ final class WordChain implements Listener {
                 // Placed from the bag: a failed write put the item back, so the entity must go too.
                 // Frames and untagged stands were already covered. Boats, minecarts, crystals and paintings
                 // were snapshotted by ItemSync and then left in the world (the item and the entity).
-                if (found != null && placedFromBag(found)) {
+                // A consumed arrow, trident, spawn-egg mob or bucket mob is the same class, marked discard.
+                if (found == null || found instanceof Player) {
+                    return;
+                }
+                if (found.getScoreboardTags().contains(Npcs.TAG) || found.getScoreboardTags().contains(Mobs.TAG)) {
+                    return;
+                }
+                if (discard || placedFromBag(found)) {
                     if (found instanceof org.bukkit.inventory.InventoryHolder holder) {
                         holder.getInventory().clear();
+                    }
+                    if (discard) {
+                        for (Entity rider : new ArrayList<>(found.getPassengers())) {
+                            if (!(rider instanceof Player)) {
+                                rider.remove();
+                            }
+                        }
                     }
                     found.remove();
                 }

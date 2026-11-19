@@ -14,14 +14,20 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockFertilizeEvent;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.FishHook;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.EntityPlaceEvent;
+import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.hanging.HangingPlaceEvent;
+import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketEntityEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.player.PlayerEggThrowEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerHarvestBlockEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
@@ -32,6 +38,9 @@ import org.bukkit.event.player.PlayerShearEntityEvent;
 import org.bukkit.event.player.PlayerTakeLecternBookEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,6 +58,8 @@ import java.util.concurrent.ConcurrentHashMap;
 final class ItemSync implements Listener {
     private final SomniaSkyblockPlugin plugin;
     private final Set<UUID> queued = ConcurrentHashMap.newKeySet();
+    /** Player who just used a spawn egg, mob bucket, thrown egg or eye, so the spawned entity can be tied to the bag write. */
+    private final Map<UUID, Integer> spawnedFrom = new HashMap<>();
 
     ItemSync(SomniaSkyblockPlugin plugin) {
         this.plugin = plugin;
@@ -510,6 +521,9 @@ final class ItemSync implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEmpty(PlayerBucketEmptyEvent event) {
+        if (mobBucket(event.getBucket())) {
+            armSpawn(event.getPlayer());
+        }
         sync(event.getPlayer());
     }
 
@@ -523,11 +537,196 @@ final class ItemSync implements Listener {
         sync(event.getPlayer());
     }
 
+    /**
+     * A short purse cannot pay for the arrow or the charge. Cancelling the bow event leaves the arrow in the bag.
+     * Tridents, pearls, eggs and spawn eggs are a right-click, cancelled below before the entity exists.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBowGas(EntityShootBowEvent event) {
+        if (event.getEntity() instanceof Player player && gasBlocked(player)) {
+            event.setCancelled(true);
+            tellGas(player);
+        }
+    }
+
+    /**
+     * Throws and spawn eggs spend a bag item and leave an entity behind. With too little gas the write puts the
+     * item back and the entity would stay (a second arrow, a free mob, a chicken that lays more eggs). A click
+     * that opens a chest or a table still opens: the item is not used.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onThrowGas(PlayerInteractEvent event) {
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        org.bukkit.inventory.ItemStack item = event.getItem();
+        if (item == null || !consumableThrow(item.getType())) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (action == Action.RIGHT_CLICK_BLOCK && !player.isSneaking() && opensUi(event.getClickedBlock())) {
+            return;
+        }
+        if (!gasBlocked(player)) {
+            return;
+        }
+        event.setCancelled(true);
+        event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+        event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+        if (event.getHand() == EquipmentSlot.HAND) {
+            tellGas(player);
+        }
+    }
+
+    /** Remember who used the item this tick. The mob or the eye spawns after this event returns. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onThrowArm(PlayerInteractEvent event) {
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        org.bukkit.inventory.ItemStack item = event.getItem();
+        if (item == null || !chainBag(event.getPlayer())) {
+            return;
+        }
+        Material type = item.getType();
+        if (type.name().endsWith("_SPAWN_EGG") || type == Material.ENDER_EYE) {
+            armSpawn(event.getPlayer());
+        }
+    }
+
+    /** The chicken hatches when the egg lands, which can be while the bag write is still open. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onEggLand(PlayerEggThrowEvent event) {
+        if (chainBag(event.getPlayer())) {
+            armSpawn(event.getPlayer());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onConsumedSpawn(CreatureSpawnEvent event) {
+        CreatureSpawnEvent.SpawnReason reason = event.getSpawnReason();
+        if (reason != CreatureSpawnEvent.SpawnReason.SPAWNER_EGG
+                && reason != CreatureSpawnEvent.SpawnReason.BUCKET
+                && reason != CreatureSpawnEvent.SpawnReason.EGG) {
+            return;
+        }
+        Player player = spawner(event.getLocation());
+        if (player == null || plugin.words() == null) {
+            return;
+        }
+        // A chicken from a thrown egg is only rolled back while the egg's write is still open.
+        // After that write lands, the egg was paid for and the chick stays.
+        if (reason == CreatureSpawnEvent.SpawnReason.EGG && !plugin.words().writing(player)) {
+            return;
+        }
+        plugin.words().rememberConsumed(player, event.getEntity());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEye(EntitySpawnEvent event) {
+        if (!(event.getEntity() instanceof org.bukkit.entity.EnderSignal signal) || plugin.words() == null) {
+            return;
+        }
+        Player player = spawner(signal.getLocation());
+        if (player != null) {
+            plugin.words().rememberConsumed(player, signal);
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onThrow(ProjectileLaunchEvent event) {
-        if (event.getEntity().getShooter() instanceof Player player) {
-            sync(player);
+        if (!(event.getEntity().getShooter() instanceof Player player)) {
+            return;
         }
+        // The hook is the rod, not a spent item. Removing it on a failed write would cancel a legal cast.
+        if (!(event.getEntity() instanceof FishHook) && plugin.words() != null && chainBag(player)) {
+            plugin.words().rememberConsumed(player, event.getEntity());
+        }
+        sync(player);
+    }
+
+    private void armSpawn(Player player) {
+        if (player != null && chainBag(player)) {
+            spawnedFrom.put(player.getUniqueId(), Bukkit.getCurrentTick());
+        }
+    }
+
+    /** Closest player who used a spawning item this tick, in this world. */
+    private Player spawner(org.bukkit.Location at) {
+        if (at == null || at.getWorld() == null) {
+            return null;
+        }
+        int tick = Bukkit.getCurrentTick();
+        Iterator<Map.Entry<UUID, Integer>> it = spawnedFrom.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Integer> entry = it.next();
+            if (entry.getValue() != tick) {
+                it.remove();
+            }
+        }
+        Player best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Map.Entry<UUID, Integer> entry : spawnedFrom.entrySet()) {
+            Player player = plugin.getServer().getPlayer(entry.getKey());
+            if (player == null || !at.getWorld().equals(player.getWorld())) {
+                continue;
+            }
+            double dist = player.getLocation().distanceSquared(at);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = player;
+            }
+        }
+        return best;
+    }
+
+    /** A right-click that spends the item and leaves a projectile or a mob. */
+    private static boolean consumableThrow(Material type) {
+        if (type == null) {
+            return false;
+        }
+        if (type.name().endsWith("_SPAWN_EGG")) {
+            return true;
+        }
+        return type == Material.EGG
+                || type == Material.SNOWBALL
+                || type == Material.ENDER_PEARL
+                || type == Material.ENDER_EYE
+                || type == Material.EXPERIENCE_BOTTLE
+                || type == Material.SPLASH_POTION
+                || type == Material.LINGERING_POTION
+                || type == Material.WIND_CHARGE
+                || type == Material.FIRE_CHARGE
+                || type == Material.TRIDENT;
+    }
+
+    /** Fish, axolotl, tadpole and the rest. Liquid and powder buckets do not spawn a mob. */
+    private static boolean mobBucket(Material type) {
+        if (type == null || !type.name().endsWith("_BUCKET")) {
+            return false;
+        }
+        return type != Material.WATER_BUCKET
+                && type != Material.LAVA_BUCKET
+                && type != Material.MILK_BUCKET
+                && type != Material.POWDER_SNOW_BUCKET;
+    }
+
+    /** Chests, workstations and other blocks that open instead of using the held item. */
+    private static boolean opensUi(Block block) {
+        if (block == null) {
+            return false;
+        }
+        Material type = block.getType();
+        if (type == Material.CRAFTING_TABLE || type == Material.ENCHANTING_TABLE || type == Material.ENDER_CHEST
+                || type == Material.ANVIL || type == Material.CHIPPED_ANVIL || type == Material.DAMAGED_ANVIL
+                || type == Material.GRINDSTONE || type == Material.SMITHING_TABLE || type == Material.STONECUTTER
+                || type == Material.LOOM || type == Material.CARTOGRAPHY_TABLE || type == Material.BEACON
+                || type == Material.BREWING_STAND) {
+            return true;
+        }
+        return block.getState() instanceof org.bukkit.inventory.InventoryHolder;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
