@@ -22,6 +22,8 @@ play.example.com {
 			# The plugin (RealIp.java) reads the player's IP from X-Real-IP, only when the
 			# connection comes from network.trusted-proxies (default 127.0.0.1 and ::1).
 			header_up X-Real-IP {remote_host}
+			# With EaglerXServer forwarding on (docs/DEPLOY_VPS.md section 7):
+			# import /etc/caddy/eagler-secret.caddy
 		}
 	}
 

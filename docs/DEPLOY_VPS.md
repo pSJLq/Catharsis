@@ -200,12 +200,23 @@ every browser player arrives from `127.0.0.1`, so those limits stop working on t
 (registration cap, login lockout) still work through `RealIp.java`, but connection floods are no longer throttled.
 Turn on EaglerXServer's forwarding on the VPS only (local play on the PC needs no change):
 
-1. Make a secret: `head -c 32 /dev/urandom | base64 | tr -d '/+=' > ~/catharsis/server/plugins/EaglercraftXServer/eagler_forwarding.secret`
+1. Make the secret in Paper's working directory (`forward_secret_file` is read relative to `/opt/catharsis/server`,
+   not the plugin folder; a wrong path makes EaglerXServer fail to start, which turns off browser play):
+   `sudo -u catharsis sh -c "umask 077; head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | head -c 48 > /opt/catharsis/server/eagler_forwarding.secret"`
 2. In `server/plugins/EaglercraftXServer/listener.yml`: `forward_ip: true`, `forward_secret: true`
    (header names stay `X-Real-IP` / `X-Eagler-Secret`).
-3. In the `@game` block of `/etc/caddy/Caddyfile`, next to `header_up X-Real-IP {remote_host}`, add
-   `header_up X-Eagler-Secret <the secret>` (only in `/etc/caddy`, never in git), then reload Caddy and restart Paper.
+3. Put the header in its own file, readable only by Caddy, and import it in every `reverse_proxy 127.0.0.1:25565`
+   block next to `header_up X-Real-IP {remote_host}` (do not pass it through an environment variable: the packaged
+   unit runs `caddy run --environ`, which prints the environment to the journal):
+   ```bash
+   { printf 'header_up X-Eagler-Secret '; sudo cat /opt/catharsis/server/eagler_forwarding.secret; echo; } | sudo tee /etc/caddy/eagler-secret.caddy >/dev/null
+   sudo chown root:caddy /etc/caddy/eagler-secret.caddy && sudo chmod 640 /etc/caddy/eagler-secret.caddy
+   # in /etc/caddy/Caddyfile:   import /etc/caddy/eagler-secret.caddy
+   ```
+   Reload Caddy first, then restart Paper the usual way (backup, warn if anyone is online, one `control/stop`).
 
+A WebSocket straight to port 25565 without the secret is now refused ("Connected without a valid forwarding secret
+header"); Java Edition clients on 25565 are not affected.
 Now the limits count per real IP, a direct WebSocket without the secret cannot fake its address, and `RealIp.java`
 simply sees the real address as the socket address.
 ## 8. Checks after the move
@@ -221,7 +232,7 @@ simply sees the real address as the socket address.
 
 Island deed metadata (`SkyIsland4.tokenURI`) uses the base URI set at deploy time
 (`http://127.0.0.1:8791/api/island/` by default in `tools/chain/deploy-island4.js`). After the domain works, the admin
-can call `setBaseURI("https://<domain>/api/island/")` once so wallets and explorers can read the deed pictures.
+can call `setBaseURI("https://<domain>/api/island/")` once so wallets and explorers can read the deed pictures (keep the trailing slash: `tokenURI` is `baseURI + id`). Done for playcatharsis.xyz on 2026-11-19.
 
 ## 10. Day-to-day on the VPS
 
