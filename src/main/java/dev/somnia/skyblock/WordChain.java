@@ -31,6 +31,7 @@ import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.LeavesDecayEvent;
+import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -369,6 +370,12 @@ final class WordChain implements Listener {
             tellGas(player);
             return;
         }
+        // The other half of a door, bed or tall plant shares this place. Breaking it drops a second copy.
+        if (placeHeld(block)) {
+            event.setCancelled(true);
+            tellHeld(player);
+            return;
+        }
         List<ItemStack> drops = new ArrayList<>(block.getDrops(player.getInventory().getItemInMainHand(), player));
         Block lowerHalf = lowerHalf(block);
         if (lowerHalf != null) {
@@ -512,6 +519,7 @@ final class WordChain implements Listener {
             event.setCancelled(true);
             return;
         }
+        seat.placing.add(placedKey);
         PendingPlace pending = new PendingPlace(
                 event.getBlockPlaced().getLocation().clone(),
                 event.getBlockPlaced().getBlockData().getAsString(),
@@ -523,7 +531,7 @@ final class WordChain implements Listener {
         );
         BigInteger[] trial = seat.trustLocal ? liveWords(player) : shown(seat);
         if (!applyPlace(trial, pending)) {
-            seat.held.remove(placedKey);
+            releasePlace(seat, placedKey);
             event.setCancelled(true);
             tell(player, "That block is not in the signed inventory.", NamedTextColor.RED);
             return;
@@ -945,38 +953,50 @@ final class WordChain implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapPiston(BlockPistonExtendEvent event) {
-        if (movesLocked(event.getBlock(), event.getBlocks())) {
+        if (movesLocked(event.getBlock(), event.getBlocks()) || movesPlaced(event.getBlock(), event.getBlocks())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapPistonRetract(BlockPistonRetractEvent event) {
-        if (movesLocked(event.getBlock(), event.getBlocks())) {
+        if (movesLocked(event.getBlock(), event.getBlocks()) || movesPlaced(event.getBlock(), event.getBlocks())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapExplode(EntityExplodeEvent event) {
-        if (!anySnaps()) {
+        if (!anySnaps() && !anyPlacing()) {
             return;
         }
-        event.blockList().removeIf(this::lockedBlock);
+        event.blockList().removeIf(block -> lockedBlock(block) || placeHeld(block));
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapBlockExplode(BlockExplodeEvent event) {
-        if (!anySnaps()) {
+        if (!anySnaps() && !anyPlacing()) {
             return;
         }
-        event.blockList().removeIf(this::lockedBlock);
+        event.blockList().removeIf(block -> lockedBlock(block) || placeHeld(block));
     }
 
-    /** Water into a snapshotted crop or lectern. The source the player just placed still flows elsewhere. */
+    /** Water into a snapshotted crop or lectern, or into a block whose place is still unsigned. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapFlow(BlockFromToEvent event) {
-        if (lockedBlock(event.getToBlock())) {
+        if (lockedBlock(event.getToBlock()) || placeHeld(event.getToBlock())) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * A torch, sign, ladder or lantern pops when its support goes, and that drop is not a bag break.
+     * The place write then fails and puts the item back as well. Hold the block still until the receipt.
+     * Cancelling physics stops the pop; a support break does not go through {@code BlockBreakEvent}.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onPlacePhysics(BlockPhysicsEvent event) {
+        if (placeHeld(event.getBlock())) {
             event.setCancelled(true);
         }
     }
@@ -985,23 +1005,23 @@ final class WordChain implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapBurn(BlockBurnEvent event) {
         Block block = event.getBlock();
-        if (lockedBlock(block) || heldUp(block)) {
+        if (lockedBlock(block) || heldUp(block) || placeHeld(block)) {
             event.setCancelled(true);
         }
     }
 
-    /** Farmland drying pops the crop above it. */
+    /** Farmland drying pops the crop above it. A placed block would do the same. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapFade(BlockFadeEvent event) {
         Block block = event.getBlock();
-        if (lockedBlock(block) || heldUp(block)) {
+        if (lockedBlock(block) || heldUp(block) || placeHeld(block)) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapDecay(LeavesDecayEvent event) {
-        if (lockedBlock(event.getBlock())) {
+        if (lockedBlock(event.getBlock()) || placeHeld(event.getBlock())) {
             event.setCancelled(true);
         }
     }
@@ -1136,6 +1156,56 @@ final class WordChain implements Listener {
             }
         }
         return false;
+    }
+
+    /** A place is in the bag write. The other half of a door, bed or tall plant is the same place. */
+    private boolean placeHeld(Block block) {
+        if (block == null || block.getWorld() == null || !anyPlacing()) {
+            return false;
+        }
+        if (placingKey(key(block))) {
+            return true;
+        }
+        Block pair = otherHalf(block);
+        return pair != null && placingKey(key(pair));
+    }
+
+    private boolean anyPlacing() {
+        for (Seat seat : seats.values()) {
+            if (!seat.placing.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean placingKey(long key) {
+        for (Seat seat : seats.values()) {
+            if (seat.placing.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean movesPlaced(Block piston, java.util.List<Block> moved) {
+        if (placeHeld(piston)) {
+            return true;
+        }
+        if (moved == null) {
+            return false;
+        }
+        for (Block block : moved) {
+            if (placeHeld(block)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void releasePlace(Seat seat, long key) {
+        seat.held.remove(key);
+        seat.placing.remove(key);
     }
 
     /** Chest boat, minecart or animal chest whose rollback is still open. */
@@ -1534,8 +1604,8 @@ final class WordChain implements Listener {
             BigInteger[] trial = copy(target);
             if (!applyPlace(trial, pending)) {
                 seat.places.remove(pending);
-                seat.held.remove(pending.key);
-                restoreBlock(pending.location, pending.replaced);
+                releasePlace(seat, pending.key);
+                undoPlace(pending);
                 rejected = true;
                 tell(player, "That block is not in the signed inventory.", NamedTextColor.RED);
                 continue;
@@ -1585,10 +1655,11 @@ final class WordChain implements Listener {
             }
             for (PendingPlace pending : places) {
                 seat.places.remove(pending);
-                seat.held.remove(pending.key);
+                releasePlace(seat, pending.key);
                 if (pending.mark) {
                     placed.add(pending.key);
                 }
+                refreshPlace(pending);
             }
             seat.drops.removeAll(drops);
             show(player, seat);
@@ -1811,7 +1882,7 @@ final class WordChain implements Listener {
             seat.held.remove(pending.key);
         }
         for (PendingPlace pending : places) {
-            seat.held.remove(pending.key);
+            releasePlace(seat, pending.key);
         }
         Player player = plugin.getServer().getPlayer(id);
         if (done < batches.size()) {
@@ -1823,7 +1894,7 @@ final class WordChain implements Listener {
                     restoreBlock(pending.location, pending.rollback);
                 }
                 for (PendingPlace pending : places) {
-                    restoreBlock(pending.location, pending.replaced);
+                    undoPlace(pending);
                 }
                 restoreSnaps(seat, id);
             } else {
@@ -2117,6 +2188,7 @@ final class WordChain implements Listener {
         boolean pendingWorld = !seat.breaks.isEmpty() || !seat.places.isEmpty() || !seat.drops.isEmpty();
         if (!seat.bagBusy && !pendingWorld) {
             seat.held.clear();
+            seat.placing.clear();
             seat.trusted = null;
             seat.trustLocal = false;
             seat.trustFails = 0;
@@ -2749,6 +2821,56 @@ final class WordChain implements Listener {
         if (lower != null) {
             lower.setType(Material.AIR, false);
         }
+    }
+
+    /**
+     * The other half of a door, bed or tall plant. A place event only names the half the player clicked.
+     * Breaking or popping the other half drops a second copy of the item the bag already spent.
+     */
+    private static Block otherHalf(Block block) {
+        if (block == null) {
+            return null;
+        }
+        org.bukkit.block.data.BlockData data = block.getBlockData();
+        Block pair = null;
+        if (data instanceof org.bukkit.block.data.type.Bed bed) {
+            BlockFace face = bed.getPart() == org.bukkit.block.data.type.Bed.Part.HEAD
+                    ? bed.getFacing().getOppositeFace()
+                    : bed.getFacing();
+            pair = block.getRelative(face);
+        } else if (data instanceof org.bukkit.block.data.Bisected half) {
+            pair = block.getRelative(half.getHalf() == org.bukkit.block.data.Bisected.Half.TOP ? BlockFace.DOWN : BlockFace.UP);
+        }
+        if (pair == null || pair.getType() != block.getType()) {
+            return null;
+        }
+        if (data instanceof org.bukkit.block.data.type.Bed) {
+            return pair.getBlockData() instanceof org.bukkit.block.data.type.Bed ? pair : null;
+        }
+        return pair.getBlockData() instanceof org.bukkit.block.data.Bisected ? pair : null;
+    }
+
+    /**
+     * A failed place puts the old block back. The other half of a door, bed or tall plant would otherwise
+     * pop and drop the item the bag is about to return.
+     */
+    private void undoPlace(PendingPlace pending) {
+        if (pending.location != null && pending.location.getWorld() != null) {
+            Block pair = otherHalf(pending.location.getBlock());
+            if (pair != null) {
+                pair.setType(Material.AIR, false);
+            }
+        }
+        restoreBlock(pending.location, pending.replaced);
+    }
+
+    /** After a place settles, let a block that lost its support pop once. The bag already paid for it. */
+    private static void refreshPlace(PendingPlace pending) {
+        if (pending.location == null || pending.location.getWorld() == null) {
+            return;
+        }
+        Block block = pending.location.getBlock();
+        block.setBlockData(block.getBlockData(), true);
     }
 
     private void restoreBlock(Location location, String data) {
@@ -3534,6 +3656,8 @@ final class WordChain implements Listener {
         Location snapBack;
         int task = -1;
         final Set<Long> held = new HashSet<>();
+        /** Places whose bag write has not settled. Physics must not pop them into a second item. */
+        final Set<Long> placing = new HashSet<>();
         int loginTries;
         BigInteger[] trusted;
         boolean trustLocal;
