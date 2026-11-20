@@ -351,7 +351,7 @@ final class TabList implements Listener {
                 .append(Component.text("Ping: ", NamedTextColor.GRAY))
                 .append(Component.text(ping + " ms", pingColor))
                 .append(Component.newline())
-                .append(Component.text("somnia.network", NamedTextColor.AQUA));
+                .append(Component.text("playcatharsis.xyz", NamedTextColor.AQUA));
         player.sendPlayerListHeaderAndFooter(header, footer);
     }
 }

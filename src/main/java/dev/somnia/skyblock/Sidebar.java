@@ -247,7 +247,7 @@ final class Sidebar {
             }
         }
         raw.add("");
-        raw.add("§esomnia.network");
+        raw.add("§eplaycatharsis.xyz");
         // No padding: the width comes from the longest real line (~21 chars).
         // Spacer lines stay (unique runs of 1..n spaces) so the height matches the original.
         List<Component> lines = new ArrayList<>();

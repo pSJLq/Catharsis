@@ -1,6 +1,6 @@
 # Catharsis
 
-An onchain SkyBlock-style grind MMO on the [Somnia](https://somnia.network) Shannon testnet. **Play in the browser** — that is the main way to join — or connect with a desktop Java client. Both talk to the same Paper server.
+An onchain SkyBlock-style grind MMO on the [Somnia](https://somnia.network) Shannon testnet. **Play in the browser at [playcatharsis.xyz](https://playcatharsis.xyz)** — that is the main way to join — or connect with a desktop Java client. Both talk to the same Paper server.
 
 You mine, forage, farm, fight, trade, and quest. Inventory, skill XP, and collections are written to smart contracts. **Each player pays their own gas** from a personal game wallet. The chain is the source of truth: if a transaction fails or the wallet has no STT, the world action rolls back.
 

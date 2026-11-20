@@ -199,8 +199,14 @@ final class Stats implements Listener {
             return;
         }
         EntityDamageEvent.DamageCause cause = event.getCause();
-        if (cause == EntityDamageEvent.DamageCause.VOID
-                || cause == EntityDamageEvent.DamageCause.KILL
+        if (cause == EntityDamageEvent.DamageCause.VOID) {
+            // Vanilla void damage never kills here: tick() repaints the hearts from the custom HP every
+            // half second, and the custom HP does not drop from the void. Falling out is a death.
+            event.setCancelled(true);
+            fellOut(player);
+            return;
+        }
+        if (cause == EntityDamageEvent.DamageCause.KILL
                 || cause == EntityDamageEvent.DamageCause.SUICIDE
                 || cause == EntityDamageEvent.DamageCause.WORLD_BORDER) {
             return;
@@ -312,6 +318,47 @@ final class Stats implements Listener {
         hurtAt.put(id, System.currentTimeMillis());
         if (now > 0) {
             paint(player);
+        }
+    }
+
+    /** Below the island world floor the player falls forever. Same as the Gate: out of the void at once. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onFallOut(org.bukkit.event.player.PlayerMoveEvent event) {
+        org.bukkit.Location to = event.getTo();
+        if (to == null || to.getWorld() == null || to.getY() >= to.getWorld().getMinHeight() - 8) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR
+                || plugin.hub().isHub(to.getWorld())) {
+            return; // The Gate has its own void return.
+        }
+        fellOut(player);
+    }
+
+    /** The void: the normal death (coins, respawn at the island) and a void line for players nearby. */
+    void fellOut(Player player) {
+        if (player.isDead()) {
+            return;
+        }
+        if (plugin.hub().isHub(player.getWorld())) {
+            plugin.hub().teleport(player);
+            Chat.voidDeath(player);
+            return;
+        }
+        org.bukkit.World world = player.getWorld();
+        org.bukkit.Location at = player.getLocation();
+        Component line = Component.text("☠ ", NamedTextColor.RED)
+                .append(Component.text(player.getName() + " fell into the void.", NamedTextColor.GRAY));
+        for (Player other : world.getPlayers()) {
+            if (!other.equals(player) && other.getLocation().distanceSquared(at) < 160 * 160) {
+                other.sendMessage(line);
+            }
+        }
+        die(player, "the void");
+        // No island to go back to (or a guest without one): the Gate catches them.
+        if (player.getWorld().equals(world) && player.getLocation().getY() < world.getMinHeight()) {
+            plugin.hub().teleport(player);
         }
     }
 
