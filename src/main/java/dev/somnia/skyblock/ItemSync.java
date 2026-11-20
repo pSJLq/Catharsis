@@ -485,6 +485,119 @@ final class ItemSync implements Listener {
         sync(event.getPlayer());
     }
 
+    /**
+     * A saddle, chest, carpet, horse armor, wolf armor or harness leaves the bag and stays on the mob.
+     * The horse menu snapshots a click inside it. A right-click equip does not, so a failed signature
+     * put the item back in the bag and left it on the mob. Snapshot before vanilla applies the click.
+     * Tagged NPCs, combat mobs and minions are not mounts.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onMountEquip(PlayerInteractEntityEvent event) {
+        org.bukkit.entity.Entity target = event.getRightClicked();
+        Player player = event.getPlayer();
+        org.bukkit.inventory.ItemStack hand = player.getInventory().getItem(event.getHand());
+        if (!willEquip(target, hand)) {
+            return;
+        }
+        if (gasBlocked(player)) {
+            event.setCancelled(true);
+            if (event.getHand() == EquipmentSlot.HAND) {
+                tellGas(player);
+            }
+            return;
+        }
+        if (plugin.words() != null && chainBag(player)) {
+            plugin.words().rememberMount(player, target);
+        }
+    }
+
+    /** True when this right-click will move the held stack onto the mob (or swap a piece that drops the old one). */
+    private static boolean willEquip(org.bukkit.entity.Entity entity, org.bukkit.inventory.ItemStack hand) {
+        if (entity == null || entity instanceof Player || hand == null || hand.getType().isAir() || pluginMarked(entity)) {
+            return false;
+        }
+        Material type = hand.getType();
+        String name = type.name();
+        if (type == Material.SADDLE) {
+            if (entity instanceof org.bukkit.entity.Steerable steerable
+                    && !(entity instanceof org.bukkit.entity.AbstractHorse)
+                    && !steerable.hasSaddle()) {
+                return true;
+            }
+            if (entity instanceof org.bukkit.entity.AbstractHorse horse && emptyStack(horse.getInventory().getSaddle())) {
+                return true;
+            }
+            if (entity instanceof org.bukkit.entity.AbstractNautilus nautilus && emptyStack(nautilus.getInventory().getSaddle())) {
+                return true;
+            }
+            return saddleSlotEmpty(entity);
+        }
+        if (type == Material.CHEST && entity instanceof org.bukkit.entity.ChestedHorse horse) {
+            return !horse.isCarryingChest();
+        }
+        if (name.endsWith("_CARPET") && !name.contains("MOSS") && entity instanceof org.bukkit.entity.Llama) {
+            return true;
+        }
+        if (name.endsWith("_HORSE_ARMOR") && entity instanceof org.bukkit.entity.Horse) {
+            return true;
+        }
+        if (name.contains("NAUTILUS_ARMOR") && entity instanceof org.bukkit.entity.AbstractNautilus) {
+            return true;
+        }
+        if (!bodyGear(type) || !(entity instanceof org.bukkit.entity.LivingEntity living)) {
+            return false;
+        }
+        if (!living.canUseEquipmentSlot(EquipmentSlot.BODY)) {
+            return false;
+        }
+        // Wolf armor and a harness do not swap. A second one stays in the hand.
+        return emptyStack(equipment(living, EquipmentSlot.BODY));
+    }
+
+    private static boolean saddleSlotEmpty(org.bukkit.entity.Entity entity) {
+        if (entity instanceof org.bukkit.entity.AbstractHorse || entity instanceof org.bukkit.entity.AbstractNautilus) {
+            return false;
+        }
+        if (!(entity instanceof org.bukkit.entity.LivingEntity living) || !living.canUseEquipmentSlot(EquipmentSlot.SADDLE)) {
+            return false;
+        }
+        return emptyStack(equipment(living, EquipmentSlot.SADDLE));
+    }
+
+    private static boolean bodyGear(Material type) {
+        if (type == null || type == Material.SADDLE) {
+            return false;
+        }
+        String name = type.name();
+        return type == Material.WOLF_ARMOR || name.endsWith("_HARNESS") || name.contains("NAUTILUS_ARMOR");
+    }
+
+    private static org.bukkit.inventory.ItemStack equipment(org.bukkit.entity.LivingEntity living, EquipmentSlot slot) {
+        org.bukkit.inventory.EntityEquipment eq = living.getEquipment();
+        if (eq == null || !living.canUseEquipmentSlot(slot)) {
+            return null;
+        }
+        try {
+            return eq.getItem(slot);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean emptyStack(org.bukkit.inventory.ItemStack stack) {
+        return stack == null || stack.getType().isAir() || stack.getAmount() <= 0;
+    }
+
+    /** NPC bodies, combat mobs, minions and other plugin entities are not player tack. */
+    private static boolean pluginMarked(org.bukkit.entity.Entity entity) {
+        for (String tag : entity.getScoreboardTags()) {
+            if (tag.startsWith("sb-") || tag.startsWith("sb_")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityUse(PlayerInteractEntityEvent event) {
         // A frame place/take and an armor-stand swap fire a second event after this one.

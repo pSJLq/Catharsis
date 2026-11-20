@@ -121,6 +121,8 @@ final class WordChain implements Listener {
     private final Map<UUID, ItemStack[]> pendingEnder = new ConcurrentHashMap<>();
     /** Set while a rollback removes a leash, so the knot does not drop a second lead. */
     private boolean suppressLeadDrop;
+    /** Set while a rollback takes a chest, saddle or body piece off a mob, so that piece is not dropped as well. */
+    private boolean suppressCarrierDrop;
     private final String forgedTopic;
     private static final EquipmentSlot[] STAND_SLOTS = {
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET, EquipmentSlot.HAND, EquipmentSlot.OFF_HAND
@@ -1156,6 +1158,10 @@ final class WordChain implements Listener {
      */
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onSnapCarrierDrop(EntityDropItemEvent event) {
+        if (suppressCarrierDrop) {
+            event.setCancelled(true);
+            return;
+        }
         // An eye of ender breaks into a ground item. If the bag write fails, the eye is back in the bag
         // and that ground item would be a second one. Hold it until the write lands.
         if (event.getEntity() instanceof org.bukkit.entity.EnderSignal) {
@@ -1173,12 +1179,36 @@ final class WordChain implements Listener {
             return;
         }
         WorldSnap snap = carrierSnap(event.getEntity());
+        if (snap == null) {
+            snap = mountSnap(event.getEntity());
+        }
         ItemStack stack = event.getItemDrop().getItemStack();
         if (snap == null || stack == null || stack.getType().isAir()) {
             return;
         }
         snap.withheld.add(stack.clone());
         event.setCancelled(true);
+    }
+
+    /**
+     * Taking the chest off, or clearing a saddle slot, can spawn the item instead of going through
+     * {@link EntityDropItemEvent}. A rollback must not leave that copy on the ground.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onRestoreCarrierSpawn(org.bukkit.event.entity.ItemSpawnEvent event) {
+        if (suppressCarrierDrop) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Shears pull wolf armor off as a drop. While that armor's write can still roll back, the drop would be a second copy. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapShearEntity(org.bukkit.event.player.PlayerShearEntityEvent event) {
+        if (!snapLocksEntity(event.getEntity())) {
+            return;
+        }
+        event.setCancelled(true);
+        tellHeld(event.getPlayer());
     }
 
     /**
@@ -1379,6 +1409,14 @@ final class WordChain implements Listener {
     }
 
     private WorldSnap carrierSnap(Entity entity) {
+        return entitySnap(entity, WorldSnap.CONTAINER);
+    }
+
+    private WorldSnap mountSnap(Entity entity) {
+        return entitySnap(entity, WorldSnap.MOUNT);
+    }
+
+    private WorldSnap entitySnap(Entity entity, int kind) {
         if (entity == null || !anySnaps()) {
             return null;
         }
@@ -1388,7 +1426,7 @@ final class WordChain implements Listener {
                 continue;
             }
             for (WorldSnap snap : seat.snaps) {
-                if (snap.kind == WorldSnap.CONTAINER && id.equals(snap.entity)) {
+                if (snap.kind == kind && id.equals(snap.entity)) {
                     return snap;
                 }
             }
@@ -3701,6 +3739,38 @@ final class WordChain implements Listener {
      * The first click of a pending write remembers the block. A full rollback puts that block back, so the
      * item cannot sit in the block and in the bag.
      */
+    /**
+     * Right-click tack (saddle, chest, carpet, horse armor, wolf armor, harness) before vanilla moves it.
+     * A horse, donkey, llama or nautilus keeps that gear in its inventory. A pig, strider, wolf or happy
+     * ghast keeps it on the equipment slots. The first snapshot for this mob wins.
+     */
+    void rememberMount(Player player, Entity entity) {
+        if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        if (entity instanceof InventoryHolder holder
+                && (entity instanceof org.bukkit.entity.AbstractHorse || entity instanceof org.bukkit.entity.AbstractNautilus)) {
+            rememberSnap(seat, WorldSnap.carrier(entity, holder.getInventory().getContents()));
+        }
+        if (!(entity instanceof org.bukkit.entity.AbstractHorse) && entity instanceof org.bukkit.entity.LivingEntity living) {
+            rememberSnap(seat, WorldSnap.tack(living));
+        }
+    }
+
+    /** NPC bodies, combat mobs, minions and other plugin entities are not player tack. */
+    private static boolean pluginMarked(Entity entity) {
+        for (String tag : entity.getScoreboardTags()) {
+            if (tag.startsWith("sb-") || tag.startsWith("sb_")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void rememberBlock(Player player, Block block) {
         if (block == null || block.getWorld() == null || plugin.hold().offchain(player)) {
             return;
@@ -3762,6 +3832,8 @@ final class WordChain implements Listener {
         static final int LEASH = 4;
         static final int SPAWNED = 5;
         static final int BLOCK = 6;
+        /** Saddle flag and body/saddle equipment that is not an inventory slot. */
+        static final int MOUNT = 7;
         final int kind;
         final String key;
         final Location location;
@@ -3838,6 +3910,47 @@ final class WordChain implements Listener {
         }
 
         /**
+         * Pig, strider, wolf, happy ghast, nautilus body piece. {@code data} is {@code 0}, {@code 1} or {@code x}
+         * (not steerable), then {@code S} if the saddle equipment slot is restored and {@code B} if the body slot is.
+         */
+        static WorldSnap tack(org.bukkit.entity.LivingEntity living) {
+            boolean steer = living instanceof org.bukkit.entity.Steerable;
+            boolean saddleSlot = canUse(living, EquipmentSlot.SADDLE);
+            boolean bodySlot = canUse(living, EquipmentSlot.BODY);
+            org.bukkit.inventory.EntityEquipment eq = living.getEquipment();
+            ItemStack saddleItem = saddleSlot ? worn(eq, EquipmentSlot.SADDLE) : null;
+            ItemStack body = bodySlot ? worn(eq, EquipmentSlot.BODY) : null;
+            ItemStack[] items = new ItemStack[]{clean(saddleItem), clean(body)};
+            String data = (steer ? (((org.bukkit.entity.Steerable) living).hasSaddle() ? "1" : "0") : "x")
+                    + (saddleSlot ? "S" : "")
+                    + (bodySlot ? "B" : "");
+            return new WorldSnap(MOUNT, "m:" + living.getUniqueId(), living.getLocation().clone(), living.getUniqueId(), null, items, data);
+        }
+
+        private static boolean canUse(org.bukkit.entity.LivingEntity living, EquipmentSlot slot) {
+            try {
+                return living.canUseEquipmentSlot(slot);
+            } catch (RuntimeException ignored) {
+                return false;
+            }
+        }
+
+        private static ItemStack worn(org.bukkit.inventory.EntityEquipment eq, EquipmentSlot slot) {
+            if (eq == null) {
+                return null;
+            }
+            try {
+                return eq.getItem(slot);
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+        }
+
+        private static ItemStack clean(ItemStack stack) {
+            return stack == null || stack.getType().isAir() || stack.getAmount() <= 0 ? null : stack.clone();
+        }
+
+        /**
          * Block data, plus the live inventory when the block holds items (lectern, jukebox, bookshelf, pot).
          * Campfire items live on the snapshot and are applied with {@code update}. Placed inventories
          * ({@code getInventory} when the state is placed) write through, so they are not updated again.
@@ -3903,10 +4016,20 @@ final class WordChain implements Listener {
                 }
                 if (found instanceof InventoryHolder holder && items != null) {
                     // Unequipping the chest shrinks the inventory, which used to skip the restore and leave the drops.
-                    if (found instanceof org.bukkit.entity.ChestedHorse horse
-                            && !horse.isCarryingChest()
-                            && items.length > horse.getInventory().getSize()) {
-                        horse.setCarryingChest(true);
+                    // Equipping one grows it, and the same size check used to leave the new chest on the mob.
+                    if (found instanceof org.bukkit.entity.ChestedHorse horse) {
+                        int live = horse.getInventory().getSize();
+                        if (!horse.isCarryingChest() && items.length > live) {
+                            horse.setCarryingChest(true);
+                        } else if (horse.isCarryingChest() && items.length < live) {
+                            words.suppressCarrierDrop = true;
+                            try {
+                                horse.getInventory().clear();
+                                horse.setCarryingChest(false);
+                            } finally {
+                                words.suppressCarrierDrop = false;
+                            }
+                        }
                     }
                     Inventory inv = holder.getInventory();
                     if (inv.getSize() == items.length) {
@@ -3981,6 +4104,32 @@ final class WordChain implements Listener {
                         camp.setItem(i, items[i] == null ? null : items[i].clone());
                     }
                     camp.update(true, false);
+                }
+                return;
+            }
+            if (kind == MOUNT && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (!(found instanceof org.bukkit.entity.LivingEntity living) || data == null) {
+                    return;
+                }
+                words.suppressCarrierDrop = true;
+                try {
+                    if (!data.startsWith("x") && living instanceof org.bukkit.entity.Steerable steerable) {
+                        steerable.setSaddle(data.startsWith("1"));
+                    }
+                    org.bukkit.inventory.EntityEquipment eq = living.getEquipment();
+                    if (eq != null && items != null) {
+                        if (data.indexOf('S') >= 0 && items.length > 0) {
+                            eq.setItem(EquipmentSlot.SADDLE, items[0] == null ? null : items[0].clone());
+                        }
+                        if (data.indexOf('B') >= 0 && items.length > 1) {
+                            eq.setItem(EquipmentSlot.BODY, items[1] == null ? null : items[1].clone());
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                    // a slot this mob cannot wear
+                } finally {
+                    words.suppressCarrierDrop = false;
                 }
                 return;
             }
