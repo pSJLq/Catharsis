@@ -2600,7 +2600,7 @@ final class HubManager implements Listener {
         }
     }
 
-    /** Chests, barrels, pots, workstations and other blocks that hand out or swallow items. Crafting tables stay usable. */
+    /** Chests, barrels, pots, anvils and other blocks that hand out or swallow items. Crafting tables and item-returning workstations stay usable. */
     private static boolean hubLootable(Material t) {
         if (t == null) {
             return false;
@@ -2609,16 +2609,13 @@ final class HubManager implements Listener {
         if (t == Material.CHEST || t == Material.TRAPPED_CHEST || t == Material.BARREL
                 || t == Material.HOPPER || t == Material.DROPPER || t == Material.DISPENSER
                 || t == Material.FURNACE || t == Material.BLAST_FURNACE || t == Material.SMOKER
-                || t == Material.BREWING_STAND || t == Material.ENDER_CHEST
+                || t == Material.BREWING_STAND
                 || t == Material.LECTERN || t == Material.JUKEBOX || t == Material.CAKE
                 || t == Material.DECORATED_POT || t == Material.FLOWER_POT
                 || t == Material.COMPOSTER || t == Material.SWEET_BERRY_BUSH
                 || t == Material.BEEHIVE || t == Material.BEE_NEST
                 || t == Material.CHISELED_BOOKSHELF || t == Material.CRAFTER
                 || t == Material.ANVIL || t == Material.CHIPPED_ANVIL || t == Material.DAMAGED_ANVIL
-                || t == Material.ENCHANTING_TABLE || t == Material.GRINDSTONE
-                || t == Material.SMITHING_TABLE || t == Material.STONECUTTER
-                || t == Material.LOOM || t == Material.CARTOGRAPHY_TABLE
                 || t == Material.BEACON || t == Material.RESPAWN_ANCHOR
                 || t == Material.CAMPFIRE || t == Material.SOUL_CAMPFIRE
                 || t == Material.CAULDRON || t == Material.WATER_CAULDRON

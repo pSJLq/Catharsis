@@ -244,6 +244,10 @@ final class Stats implements Listener {
         if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
+        // Co-op splash heals and buffs still land; only harmful effects count as PvP.
+        if (event.getModifiedType().getEffectCategory() != org.bukkit.potion.PotionEffectType.Category.HARMFUL) {
+            return;
+        }
         if (credit(event.getSource()) instanceof Player actor && !actor.equals(victim)) {
             event.setCancelled(true);
         }
