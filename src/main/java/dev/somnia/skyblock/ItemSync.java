@@ -582,6 +582,30 @@ final class ItemSync implements Listener {
         }
     }
 
+    /**
+     * Feeding spends the food and leaves the animal in love. A short purse used to roll the food back
+     * and still let the baby be born. Cancel before the food is used. A later signature failure is
+     * undone by the love snapshot.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onBreedGas(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof org.bukkit.entity.Animals animal)) {
+            return;
+        }
+        Player player = event.getPlayer();
+        org.bukkit.inventory.ItemStack hand = player.getInventory().getItem(event.getHand());
+        if (hand == null || hand.getType().isAir() || !animal.isBreedItem(hand)) {
+            return;
+        }
+        if (!gasBlocked(player)) {
+            return;
+        }
+        event.setCancelled(true);
+        if (event.getHand() == EquipmentSlot.HAND) {
+            tellGas(player);
+        }
+    }
+
     /** True when this right-click will move the held stack onto the mob (or swap a piece that drops the old one). */
     private static boolean willEquip(org.bukkit.entity.Entity entity, org.bukkit.inventory.ItemStack hand) {
         if (entity == null || entity instanceof Player || hand == null || hand.getType().isAir() || pluginMarked(entity)) {

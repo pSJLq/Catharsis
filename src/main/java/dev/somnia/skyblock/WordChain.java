@@ -1540,7 +1540,8 @@ final class WordChain implements Listener {
                 continue;
             }
             for (WorldSnap snap : seat.snaps) {
-                if (id.equals(snap.entity)) {
+                // Love mode is not an item on the mob. Freezing the animal would block milking and combat.
+                if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE) {
                     return true;
                 }
             }
@@ -3744,6 +3745,39 @@ final class WordChain implements Listener {
      * A horse, donkey, llama or nautilus keeps that gear in its inventory. A pig, strider, wolf or happy
      * ghast keeps it on the equipment slots. The first snapshot for this mob wins.
      */
+    /**
+     * The food is already leaving the bag. Remember the love timer from before this feed, so a failed
+     * signature clears it instead of leaving a baby the bag did not pay for.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onLove(org.bukkit.event.entity.EntityEnterLoveModeEvent event) {
+        if (!(event.getHumanEntity() instanceof Player player) || plugin.hold().offchain(player)) {
+            return;
+        }
+        org.bukkit.entity.Animals animal = event.getEntity();
+        if (animal == null || pluginMarked(animal)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.love(animal, animal.getLoveModeTicks()));
+        armSnaps(player);
+    }
+
+    /** A baby born while the food's write can still roll back is removed with that rollback. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBred(org.bukkit.event.entity.EntityBreedEvent event) {
+        if (!(event.getBreeder() instanceof Player player) || plugin.hold().offchain(player)) {
+            return;
+        }
+        if (entitySnap(event.getMother(), WorldSnap.LOVE) == null && entitySnap(event.getFather(), WorldSnap.LOVE) == null) {
+            return;
+        }
+        rememberConsumed(player, event.getEntity());
+    }
+
     void rememberMount(Player player, Entity entity) {
         if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
             return;
@@ -3834,6 +3868,8 @@ final class WordChain implements Listener {
         static final int BLOCK = 6;
         /** Saddle flag and body/saddle equipment that is not an inventory slot. */
         static final int MOUNT = 7;
+        /** Love timer from before a feed. Restored without locking the animal. */
+        static final int LOVE = 8;
         final int kind;
         final String key;
         final Location location;
@@ -3913,6 +3949,11 @@ final class WordChain implements Listener {
          * Pig, strider, wolf, happy ghast, nautilus body piece. {@code data} is {@code 0}, {@code 1} or {@code x}
          * (not steerable), then {@code S} if the saddle equipment slot is restored and {@code B} if the body slot is.
          */
+        static WorldSnap love(org.bukkit.entity.Animals animal, int ticks) {
+            return new WorldSnap(LOVE, "o:" + animal.getUniqueId(), animal.getLocation().clone(), animal.getUniqueId(), null, null,
+                    Integer.toString(Math.max(0, ticks)));
+        }
+
         static WorldSnap tack(org.bukkit.entity.LivingEntity living) {
             boolean steer = living instanceof org.bukkit.entity.Steerable;
             boolean saddleSlot = canUse(living, EquipmentSlot.SADDLE);
@@ -4130,6 +4171,21 @@ final class WordChain implements Listener {
                     // a slot this mob cannot wear
                 } finally {
                     words.suppressCarrierDrop = false;
+                }
+                return;
+            }
+            if (kind == LOVE && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof org.bukkit.entity.Animals animal) {
+                    int ticks = 0;
+                    if (data != null) {
+                        try {
+                            ticks = Integer.parseInt(data);
+                        } catch (NumberFormatException ignored) {
+                            ticks = 0;
+                        }
+                    }
+                    animal.setLoveModeTicks(Math.max(0, ticks));
                 }
                 return;
             }
