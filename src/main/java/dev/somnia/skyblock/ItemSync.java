@@ -466,7 +466,20 @@ final class ItemSync implements Listener {
                 && block.getBlockData() instanceof org.bukkit.block.data.type.RespawnAnchor anchor) {
             return anchor.getCharges() < anchor.getMaximumCharges();
         }
+        // Honeycomb is spent into the block. Scraping the wax later drops another honeycomb.
+        if (held == Material.HONEYCOMB && waxable(block)) {
+            return true;
+        }
         return false;
+    }
+
+    /** Copper that is not waxed yet, and a sign that can still take wax. Ore and raw blocks do not. */
+    private static boolean waxable(Block block) {
+        String name = block.getType().name();
+        if (!name.startsWith("WAXED_") && !name.contains("ORE") && !name.startsWith("RAW_") && name.contains("COPPER")) {
+            return true;
+        }
+        return block.getState() instanceof org.bukkit.block.Sign sign && !sign.isWaxed();
     }
 
     /** Oak shelf, poplar shelf, and the rest of the wood set. Not a chiseled bookshelf. */
