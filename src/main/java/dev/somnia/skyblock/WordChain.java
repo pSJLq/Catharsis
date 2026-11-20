@@ -58,6 +58,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTakeLecternBookEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
+import io.papermc.paper.event.entity.EntityFertilizeEggEvent;
 import io.papermc.paper.event.player.PlayerItemFrameChangeEvent;
 import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.EntityEquipment;
@@ -3778,6 +3779,28 @@ final class WordChain implements Listener {
         rememberConsumed(player, event.getEntity());
     }
 
+    /**
+     * A frog, turtle or sniffer does not spawn the baby here. The mate marks an egg instead.
+     * That mark survives a failed feed: the food comes back and the egg is laid anyway.
+     * Cancelling leaves them in love, so once the write lands the same pair mates for real.
+     * A mate that already happened is marked on the love snapshot and undone if the write fails.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFertilize(EntityFertilizeEggEvent event) {
+        WorldSnap mother = entitySnap(event.getMother(), WorldSnap.LOVE);
+        WorldSnap father = entitySnap(event.getFather(), WorldSnap.LOVE);
+        if (mother == null && father == null) {
+            return;
+        }
+        event.setCancelled(true);
+        if (mother != null) {
+            mother.fertilized = true;
+        }
+        if (father != null) {
+            father.fertilized = true;
+        }
+    }
+
     void rememberMount(Player player, Entity entity) {
         if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
             return;
@@ -3803,6 +3826,23 @@ final class WordChain implements Listener {
             }
         }
         return false;
+    }
+
+    /**
+     * Frogs and sniffers store the unpaid egg as a brain flag, not as a turtle's {@code hasEgg}.
+     * The Bukkit key is missing on some builds; a miss leaves the cancel path to do the work.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void clearPregnant(org.bukkit.entity.LivingEntity living) {
+        org.bukkit.entity.memory.MemoryKey key = org.bukkit.entity.memory.MemoryKey.getByKey(NamespacedKey.minecraft("is_pregnant"));
+        if (key == null) {
+            return;
+        }
+        try {
+            living.setMemory(key, null);
+        } catch (RuntimeException ignored) {
+            // This build stores the flag as a unit, or refuses a null memory.
+        }
     }
 
     void rememberBlock(Player player, Block block) {
@@ -3879,6 +3919,8 @@ final class WordChain implements Listener {
         final String data;
         /** A spawned mob or projectile that must disappear if the bag item comes back. */
         boolean discard;
+        /** This feed's mate tried to mark an egg while the write was still open. */
+        boolean fertilized;
         /** Cargo a chested animal dropped while this snapshot can still roll back. Spawned only if the write lands. */
         final List<ItemStack> withheld = new ArrayList<>();
 
@@ -4186,6 +4228,14 @@ final class WordChain implements Listener {
                         }
                     }
                     animal.setLoveModeTicks(Math.max(0, ticks));
+                    // The mate was refused, but a server that marks the egg before the event
+                    // would still lay it after the food is back. Clear that mark.
+                    if (fertilized) {
+                        if (animal instanceof org.bukkit.entity.Turtle turtle) {
+                            turtle.setHasEgg(false);
+                        }
+                        clearPregnant(animal);
+                    }
                 }
                 return;
             }
