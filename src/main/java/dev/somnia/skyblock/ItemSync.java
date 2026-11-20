@@ -804,6 +804,71 @@ final class ItemSync implements Listener {
         }
     }
 
+    /**
+     * A dancing allay takes an amethyst shard and leaves a second allay. Giving it any other item
+     * puts that stack in its hand. A failed signature used to return the item and leave the copy.
+     * Snapshot the hand and the cooldown before vanilla applies the click. The spawned allay is
+     * tied to this tick the same way as a spawn egg.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onAllay(PlayerInteractEntityEvent event) {
+        if (!(event.getRightClicked() instanceof org.bukkit.entity.Allay allay) || pluginMarked(allay)) {
+            return;
+        }
+        Player player = event.getPlayer();
+        org.bukkit.inventory.ItemStack hand = player.getInventory().getItem(event.getHand());
+        boolean shard = hand != null && hand.getType() == Material.AMETHYST_SHARD;
+        boolean dupe = shard && allay.isDancing() && allay.canDuplicate();
+        // A name tag names the allay. It does not move into the hand.
+        boolean naming = hand != null && hand.getType() == Material.NAME_TAG;
+        org.bukkit.inventory.ItemStack held = allayHeld(allay);
+        boolean give = !dupe && !naming && hand != null && !hand.getType().isAir() && emptyStack(held);
+        boolean take = !naming && emptyStack(hand) && !emptyStack(held);
+        if (!dupe && !give && !take) {
+            return;
+        }
+        if (gasBlocked(player)) {
+            event.setCancelled(true);
+            if (event.getHand() == EquipmentSlot.HAND) {
+                tellGas(player);
+            }
+            return;
+        }
+        if (plugin.words() == null || !chainBag(player)) {
+            return;
+        }
+        if (dupe) {
+            plugin.words().rememberAllay(player, allay);
+            armSpawn(player);
+            return;
+        }
+        // The held stack is the equipment hand, not a saddle. A mount snapshot would not put it back.
+        plugin.words().rememberAllayHand(player, allay);
+    }
+
+    /**
+     * The stack a player gave the allay lives in its hand. Picked-up copies live in the one-slot inventory.
+     * Either one is enough to count the allay as holding something.
+     */
+    private static org.bukkit.inventory.ItemStack allayHeld(org.bukkit.entity.Allay allay) {
+        org.bukkit.inventory.EntityEquipment eq = allay.getEquipment();
+        if (eq != null) {
+            try {
+                org.bukkit.inventory.ItemStack worn = eq.getItem(EquipmentSlot.HAND);
+                if (!emptyStack(worn)) {
+                    return worn;
+                }
+            } catch (RuntimeException ignored) {
+                // this allay has no hand slot
+            }
+        }
+        org.bukkit.inventory.Inventory inv = allay.getInventory();
+        if (inv != null && inv.getSize() > 0) {
+            return inv.getItem(0);
+        }
+        return null;
+    }
+
     /** The chicken hatches when the egg lands, which can be while the bag write is still open. */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onEggLand(PlayerEggThrowEvent event) {
@@ -817,7 +882,8 @@ final class ItemSync implements Listener {
         CreatureSpawnEvent.SpawnReason reason = event.getSpawnReason();
         if (reason != CreatureSpawnEvent.SpawnReason.SPAWNER_EGG
                 && reason != CreatureSpawnEvent.SpawnReason.BUCKET
-                && reason != CreatureSpawnEvent.SpawnReason.EGG) {
+                && reason != CreatureSpawnEvent.SpawnReason.EGG
+                && reason != CreatureSpawnEvent.SpawnReason.DUPLICATION) {
             return;
         }
         Player player = spawner(event.getLocation());

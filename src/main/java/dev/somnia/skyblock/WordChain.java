@@ -1542,7 +1542,9 @@ final class WordChain implements Listener {
             }
             for (WorldSnap snap : seat.snaps) {
                 // Love mode is not an item on the mob. Freezing the animal would block milking and combat.
-                if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE) {
+                // The allay cooldown is the same: the copy is removed on rollback, the parent is not frozen.
+                // The hand snapshot locks, so a kill cannot drop the stack the bag is also putting back.
+                if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE && snap.kind != WorldSnap.ALLAY) {
                     return true;
                 }
             }
@@ -3801,6 +3803,36 @@ final class WordChain implements Listener {
         }
     }
 
+    /**
+     * The shard is still in the hand. Remember the cooldown from before the copy, so a failed
+     * signature can put it back. The new allay is removed with the other consumed spawns.
+     */
+    void rememberAllay(Player player, org.bukkit.entity.Allay allay) {
+        if (allay == null || plugin.hold().offchain(player) || pluginMarked(allay)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.allay(allay));
+    }
+
+    /**
+     * Giving or taking the held stack. The hand is snapshotted before vanilla moves it, and the allay
+     * stays locked so it cannot die and drop that stack while the bag write can still roll back.
+     */
+    void rememberAllayHand(Player player, org.bukkit.entity.Allay allay) {
+        if (allay == null || plugin.hold().offchain(player) || pluginMarked(allay)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.allayHand(allay));
+    }
+
     void rememberMount(Player player, Entity entity) {
         if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
             return;
@@ -3910,6 +3942,10 @@ final class WordChain implements Listener {
         static final int MOUNT = 7;
         /** Love timer from before a feed. Restored without locking the animal. */
         static final int LOVE = 8;
+        /** Duplication cooldown from before an amethyst shard. The copy itself is a consumed spawn. */
+        static final int ALLAY = 9;
+        /** Equipment hand and pickup slot from before a give or a take. */
+        static final int HAND = 10;
         final int kind;
         final String key;
         final Location location;
@@ -3994,6 +4030,37 @@ final class WordChain implements Listener {
         static WorldSnap love(org.bukkit.entity.Animals animal, int ticks) {
             return new WorldSnap(LOVE, "o:" + animal.getUniqueId(), animal.getLocation().clone(), animal.getUniqueId(), null, null,
                     Integer.toString(Math.max(0, ticks)));
+        }
+
+        /** Cooldown and duplicate flag from before the shard. {@code data} is {@code ticks:0} or {@code ticks:1}. */
+        static WorldSnap allay(org.bukkit.entity.Allay allay) {
+            String data = allay.getDuplicationCooldown() + ":" + (allay.canDuplicate() ? "1" : "0");
+            return new WorldSnap(ALLAY, "a:" + allay.getUniqueId(), allay.getLocation().clone(), allay.getUniqueId(), null, null, data);
+        }
+
+        /**
+         * Index 0 is the equipment hand (the stack a player gave). Index 1 is pickup-slot 0.
+         * A miss on either slot stores null and the restore clears only that slot.
+         */
+        static WorldSnap allayHand(org.bukkit.entity.Allay allay) {
+            ItemStack worn = null;
+            org.bukkit.inventory.EntityEquipment eq = allay.getEquipment();
+            if (eq != null) {
+                try {
+                    ItemStack stack = eq.getItem(EquipmentSlot.HAND);
+                    worn = stack == null || stack.getType().isAir() ? null : stack.clone();
+                } catch (RuntimeException ignored) {
+                    worn = null;
+                }
+            }
+            ItemStack stored = null;
+            Inventory inv = allay.getInventory();
+            if (inv != null && inv.getSize() > 0) {
+                ItemStack stack = inv.getItem(0);
+                stored = stack == null || stack.getType().isAir() ? null : stack.clone();
+            }
+            return new WorldSnap(HAND, "h:" + allay.getUniqueId(), allay.getLocation().clone(), allay.getUniqueId(), null,
+                    new ItemStack[]{worn, stored});
         }
 
         static WorldSnap tack(org.bukkit.entity.LivingEntity living) {
@@ -4211,6 +4278,44 @@ final class WordChain implements Listener {
                     }
                 } catch (RuntimeException ignored) {
                     // a slot this mob cannot wear
+                } finally {
+                    words.suppressCarrierDrop = false;
+                }
+                return;
+            }
+            if (kind == ALLAY && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found instanceof org.bukkit.entity.Allay allay && data != null) {
+                    int colon = data.indexOf(':');
+                    if (colon > 0) {
+                        try {
+                            allay.setDuplicationCooldown(Long.parseLong(data.substring(0, colon)));
+                            allay.setCanDuplicate(data.charAt(data.length() - 1) == '1');
+                        } catch (NumberFormatException | IndexOutOfBoundsException ignored) {
+                            // the saved cooldown is not a number this server wrote
+                        }
+                    }
+                }
+                return;
+            }
+            if (kind == HAND && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (!(found instanceof org.bukkit.entity.LivingEntity living) || items == null) {
+                    return;
+                }
+                words.suppressCarrierDrop = true;
+                try {
+                    org.bukkit.inventory.EntityEquipment eq = living.getEquipment();
+                    if (eq != null && items.length > 0) {
+                        try {
+                            eq.setItem(EquipmentSlot.HAND, items[0] == null ? null : items[0].clone());
+                        } catch (RuntimeException ignored) {
+                            // this mob cannot wear a hand item
+                        }
+                    }
+                    if (found instanceof InventoryHolder holder && items.length > 1 && holder.getInventory().getSize() > 0) {
+                        holder.getInventory().setItem(0, items[1] == null ? null : items[1].clone());
+                    }
                 } finally {
                     words.suppressCarrierDrop = false;
                 }
