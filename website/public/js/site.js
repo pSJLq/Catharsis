@@ -232,7 +232,8 @@
 
   function gameOwnsKey(e) {
     if (!playing()) return false;
-    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    // Ctrl alone still reaches the game: it is sprint, and Ctrl+Q (drop the stack) needs the game to see it held.
+    if ((e.metaKey || e.ctrlKey || e.altKey) && e.key !== "Control") return false;
     if (editable(e.target)) return false;
     if (fromGame(e) || childLocked()) return true;
     if (e.target === frame || document.activeElement === frame) return true;
