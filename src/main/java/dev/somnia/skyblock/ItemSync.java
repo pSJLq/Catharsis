@@ -14,6 +14,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockFertilizeEvent;
+import org.bukkit.event.block.CauldronLevelChangeEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.FishHook;
 import org.bukkit.event.entity.CreatureSpawnEvent;
@@ -256,6 +257,19 @@ final class ItemSync implements Listener {
             // BlockFertilizeEvent snapshots the blocks that actually change.
             return;
         }
+        if (bottleOnCauldron(block, hand)) {
+            // Cancelling here is before vanilla fills or empties the bottle. The level event is what
+            // snapshots, and only when the liquid actually changes, so an empty click does not freeze it.
+            if (gasBlocked(event.getPlayer())) {
+                event.setCancelled(true);
+                event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+                event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+                if (event.getHand() == EquipmentSlot.HAND) {
+                    tellGas(event.getPlayer());
+                }
+                return;
+            }
+        }
         if (!storesHeldItem(block, hand)) {
             return;
         }
@@ -263,6 +277,50 @@ final class ItemSync implements Listener {
             return;
         }
         snapBlock(event.getPlayer(), block);
+    }
+
+    /**
+     * Pouring a bottle in and filling one out are not bucket events. A failed signature used to put the
+     * bottle back and leave the new liquid, so a second bottle could take it out again.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onCauldronBottle(CauldronLevelChangeEvent event) {
+        if (!(event.getEntity() instanceof Player player) || !bottleReason(event.getReason())) {
+            return;
+        }
+        if (denyGas(event, player)) {
+            return;
+        }
+        snapBlock(player, event.getBlock());
+        if (plugin.words() != null) {
+            plugin.words().armSnaps(player);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onCauldronBottled(CauldronLevelChangeEvent event) {
+        if (event.getEntity() instanceof Player player && bottleReason(event.getReason())) {
+            sync(player);
+        }
+    }
+
+    private static boolean bottleReason(CauldronLevelChangeEvent.ChangeReason reason) {
+        return reason == CauldronLevelChangeEvent.ChangeReason.BOTTLE_EMPTY
+                || reason == CauldronLevelChangeEvent.ChangeReason.BOTTLE_FILL;
+    }
+
+    /** A glass bottle or a potion against a cauldron. Lava and powder snow stay on the bucket path. */
+    private static boolean bottleOnCauldron(Block block, org.bukkit.inventory.ItemStack hand) {
+        if (block == null || hand == null || !block.getType().name().endsWith("CAULDRON")) {
+            return false;
+        }
+        Material type = block.getType();
+        if (type == Material.LAVA_CAULDRON || type == Material.POWDER_SNOW_CAULDRON) {
+            return false;
+        }
+        Material held = hand.getType();
+        return held == Material.GLASS_BOTTLE || held == Material.POTION
+                || held == Material.SPLASH_POTION || held == Material.LINGERING_POTION;
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
