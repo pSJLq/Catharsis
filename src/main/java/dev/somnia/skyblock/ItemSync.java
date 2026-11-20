@@ -847,6 +847,29 @@ final class ItemSync implements Listener {
     }
 
     /**
+     * A name tag is spent and the mob keeps the name. A failed signature used to return the tag
+     * and leave the name. Snapshot the old name before it changes. A short purse never spends the tag.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onNameTag(io.papermc.paper.event.player.PlayerNameEntityEvent event) {
+        Player player = event.getPlayer();
+        org.bukkit.entity.LivingEntity living = event.getEntity();
+        if (living == null || living instanceof Player) {
+            return;
+        }
+        if (gasBlocked(player)) {
+            event.setCancelled(true);
+            tellGas(player);
+            return;
+        }
+        if (plugin.words() == null || !chainBag(player)) {
+            return;
+        }
+        plugin.words().rememberName(player, living);
+        sync(player);
+    }
+
+    /**
      * The stack a player gave the allay lives in its hand. Picked-up copies live in the one-slot inventory.
      * Either one is enough to count the allay as holding something.
      */

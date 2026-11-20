@@ -1544,7 +1544,9 @@ final class WordChain implements Listener {
                 // Love mode is not an item on the mob. Freezing the animal would block milking and combat.
                 // The allay cooldown is the same: the copy is removed on rollback, the parent is not frozen.
                 // The hand snapshot locks, so a kill cannot drop the stack the bag is also putting back.
-                if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE && snap.kind != WorldSnap.ALLAY) {
+                // A name is not an item on the mob. Freezing it would block milking and combat.
+                if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE && snap.kind != WorldSnap.ALLAY
+                        && snap.kind != WorldSnap.NAME) {
                     return true;
                 }
             }
@@ -3833,6 +3835,22 @@ final class WordChain implements Listener {
         rememberSnap(seat, WorldSnap.allayHand(allay));
     }
 
+    /**
+     * The tag is still in the hand. Remember the name from before this click. This event runs
+     * after the interact that queues the bag write, so arm the snapshot here.
+     */
+    void rememberName(Player player, org.bukkit.entity.LivingEntity living) {
+        if (living == null || living instanceof Player || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        rememberSnap(seat, WorldSnap.givenName(living));
+        armSnaps(player);
+    }
+
     void rememberMount(Player player, Entity entity) {
         if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
             return;
@@ -3946,6 +3964,8 @@ final class WordChain implements Listener {
         static final int ALLAY = 9;
         /** Equipment hand and pickup slot from before a give or a take. */
         static final int HAND = 10;
+        /** Custom name, visibility and despawn flag from before a name tag. Not a lock. */
+        static final int NAME = 11;
         final int kind;
         final String key;
         final Location location;
@@ -4062,6 +4082,23 @@ final class WordChain implements Listener {
             return new WorldSnap(HAND, "h:" + allay.getUniqueId(), allay.getLocation().clone(), allay.getUniqueId(), null,
                     new ItemStack[]{worn, stored});
         }
+
+        /**
+         * Three leading flags, then the old name in section format. Flag 0 is visibility, flag 1 is
+         * remove-when-far, flag 2 is whether a name was set. The text may be empty.
+         */
+        static WorldSnap givenName(org.bukkit.entity.LivingEntity living) {
+            Component custom = living.customName();
+            String legacy = custom == null ? "" : NAME_TEXT.serialize(custom);
+            String data = (living.isCustomNameVisible() ? "1" : "0")
+                    + (living.getRemoveWhenFarAway() ? "1" : "0")
+                    + (custom == null ? "0" : "1")
+                    + legacy;
+            return new WorldSnap(NAME, "g:" + living.getUniqueId(), living.getLocation().clone(), living.getUniqueId(), null, null, data);
+        }
+
+        private static final net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer NAME_TEXT =
+                net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection();
 
         static WorldSnap tack(org.bukkit.entity.LivingEntity living) {
             boolean steer = living instanceof org.bukkit.entity.Steerable;
@@ -4319,6 +4356,17 @@ final class WordChain implements Listener {
                 } finally {
                     words.suppressCarrierDrop = false;
                 }
+                return;
+            }
+            if (kind == NAME && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (!(found instanceof org.bukkit.entity.LivingEntity living) || data == null || data.length() < 3) {
+                    return;
+                }
+                boolean hasName = data.charAt(2) == '1';
+                living.customName(hasName ? NAME_TEXT.deserialize(data.substring(3)) : null);
+                living.setCustomNameVisible(data.charAt(0) == '1');
+                living.setRemoveWhenFarAway(data.charAt(1) == '1');
                 return;
             }
             if (kind == LOVE && entity != null) {
