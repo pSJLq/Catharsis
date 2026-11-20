@@ -1205,11 +1205,44 @@ final class WordChain implements Listener {
     /** Shears pull wolf armor off as a drop. While that armor's write can still roll back, the drop would be a second copy. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSnapShearEntity(org.bukkit.event.player.PlayerShearEntityEvent event) {
+        // A sheep's new color is not paid for yet. Shearing it would drop wool of that color.
+        if (event.getEntity() instanceof org.bukkit.entity.Sheep sheep && entitySnap(sheep, WorldSnap.DYE) != null) {
+            event.setCancelled(true);
+            tellHeld(event.getPlayer());
+            return;
+        }
         if (!snapLocksEntity(event.getEntity())) {
             return;
         }
         event.setCancelled(true);
         tellHeld(event.getPlayer());
+    }
+
+    /**
+     * A dispenser shears without a player event. Cancelling here leaves the sheep unshorn until the
+     * dye's write settles, so the wool cannot drop in a color the bag did not pay for.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSnapDyeDispenseShear(org.bukkit.event.block.BlockShearEntityEvent event) {
+        if (!(event.getEntity() instanceof org.bukkit.entity.Sheep sheep) || entitySnap(sheep, WorldSnap.DYE) == null) {
+            return;
+        }
+        event.setCancelled(true);
+    }
+
+    /**
+     * Death, or a shear that did not use the shear events, can still pop wool. While the dye's write
+     * can still roll back, that wool would be free. Mutton is not wool and still drops.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSnapDyeWool(EntityDropItemEvent event) {
+        if (!(event.getEntity() instanceof org.bukkit.entity.Sheep sheep) || entitySnap(sheep, WorldSnap.DYE) == null) {
+            return;
+        }
+        ItemStack stack = event.getItemDrop().getItemStack();
+        if (stack != null && stack.getType().name().endsWith("_WOOL")) {
+            event.setCancelled(true);
+        }
     }
 
     /**
@@ -1544,9 +1577,9 @@ final class WordChain implements Listener {
                 // Love mode is not an item on the mob. Freezing the animal would block milking and combat.
                 // The allay cooldown is the same: the copy is removed on rollback, the parent is not frozen.
                 // The hand snapshot locks, so a kill cannot drop the stack the bag is also putting back.
-                // A name is not an item on the mob. Freezing it would block milking and combat.
+                // A name or a dye color is not an item on the mob. Freezing it would block milking and combat.
                 if (id.equals(snap.entity) && snap.kind != WorldSnap.LOVE && snap.kind != WorldSnap.ALLAY
-                        && snap.kind != WorldSnap.NAME) {
+                        && snap.kind != WorldSnap.NAME && snap.kind != WorldSnap.DYE) {
                     return true;
                 }
             }
@@ -3851,6 +3884,27 @@ final class WordChain implements Listener {
         armSnaps(player);
     }
 
+    /**
+     * The dye is still in the hand. Remember the collar or the wool color from before this click.
+     * The dye event runs after the interact that queues the bag write, so arm the snapshot here
+     * or a shear in the next moment would not see it.
+     */
+    void rememberDye(Player player, Entity entity) {
+        if (entity == null || entity instanceof Player || plugin.hold().offchain(player)) {
+            return;
+        }
+        Seat seat = seats.get(player.getUniqueId());
+        if (seat == null || !seat.loaded) {
+            return;
+        }
+        WorldSnap snap = WorldSnap.dye(entity);
+        if (snap == null) {
+            return;
+        }
+        rememberSnap(seat, snap);
+        armSnaps(player);
+    }
+
     void rememberMount(Player player, Entity entity) {
         if (entity == null || entity instanceof Player || plugin.hold().offchain(player) || pluginMarked(entity)) {
             return;
@@ -3966,6 +4020,8 @@ final class WordChain implements Listener {
         static final int HAND = 10;
         /** Custom name, visibility and despawn flag from before a name tag. Not a lock. */
         static final int NAME = 11;
+        /** Collar or body color from before a dye. Not a lock. {@code data} is {@code c:COLOR} or {@code b:COLOR}. */
+        static final int DYE = 12;
         final int kind;
         final String key;
         final Location location;
@@ -4099,6 +4155,21 @@ final class WordChain implements Listener {
 
         private static final net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer NAME_TEXT =
                 net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection();
+
+        /** Collar first, then wool or shulker body. Null when this mob has no dye color to put back. */
+        static WorldSnap dye(Entity entity) {
+            String data;
+            if (entity instanceof io.papermc.paper.entity.CollarColorable collar) {
+                org.bukkit.DyeColor color = collar.getCollarColor();
+                data = "c:" + (color == null ? "" : color.name());
+            } else if (entity instanceof org.bukkit.material.Colorable colorable) {
+                org.bukkit.DyeColor color = colorable.getColor();
+                data = "b:" + (color == null ? "" : color.name());
+            } else {
+                return null;
+            }
+            return new WorldSnap(DYE, "d:" + entity.getUniqueId(), entity.getLocation().clone(), entity.getUniqueId(), null, null, data);
+        }
 
         static WorldSnap tack(org.bukkit.entity.LivingEntity living) {
             boolean steer = living instanceof org.bukkit.entity.Steerable;
@@ -4367,6 +4438,24 @@ final class WordChain implements Listener {
                 living.customName(hasName ? NAME_TEXT.deserialize(data.substring(3)) : null);
                 living.setCustomNameVisible(data.charAt(0) == '1');
                 living.setRemoveWhenFarAway(data.charAt(1) == '1');
+                return;
+            }
+            if (kind == DYE && entity != null) {
+                Entity found = Bukkit.getEntity(entity);
+                if (found == null || data == null || data.length() < 3) {
+                    return;
+                }
+                org.bukkit.DyeColor color;
+                try {
+                    color = org.bukkit.DyeColor.valueOf(data.substring(2));
+                } catch (IllegalArgumentException ignored) {
+                    return;
+                }
+                if (data.startsWith("c:") && found instanceof io.papermc.paper.entity.CollarColorable collar) {
+                    collar.setCollarColor(color);
+                } else if (data.startsWith("b:") && found instanceof org.bukkit.material.Colorable colorable) {
+                    colorable.setColor(color);
+                }
                 return;
             }
             if (kind == LOVE && entity != null) {

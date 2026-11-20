@@ -870,6 +870,29 @@ final class ItemSync implements Listener {
     }
 
     /**
+     * Dye spent on a sheep, a collar or a shulker stays on the mob. A failed signature used to
+     * return the dye and leave the color, and a shear could then drop wool of that unpaid color.
+     * A dispenser has no bag, so it is left alone. A short purse never spends the dye.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onDye(io.papermc.paper.event.entity.EntityDyeEvent event) {
+        Player player = event.getPlayer();
+        if (player == null) {
+            return;
+        }
+        if (gasBlocked(player)) {
+            event.setCancelled(true);
+            tellGas(player);
+            return;
+        }
+        if (plugin.words() == null || !chainBag(player)) {
+            return;
+        }
+        plugin.words().rememberDye(player, event.getEntity());
+        sync(player);
+    }
+
+    /**
      * The stack a player gave the allay lives in its hand. Picked-up copies live in the one-slot inventory.
      * Either one is enough to count the allay as holding something.
      */
