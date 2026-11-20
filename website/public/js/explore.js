@@ -23,23 +23,29 @@
     return { kind: parts[0] || "", id: decodeURIComponent(parts.slice(1).join("/")) };
   }
 
-  function cardHtml(row) {
+  // Hashes already on screen. A row not in here slides in at the top with a short highlight.
+  var known = null;
+  var lastHome = "";
+
+  function cardHtml(row, fresh) {
     var who = (row.players && row.players[0]) || row.from || "";
     var player = who
       ? '<a href="#/address/' + esc(who) + '">' + esc(short(who)) + "</a>"
       : "—";
     var block = row.block == null ? "pending" : "block " + esc(row.block);
-    return '<article class="deed"><div class="deed-fog" aria-hidden="true"></div><header><a class="hash" href="#/tx/'
+    return '<article class="deed' + (fresh ? ' deed-new' : '') + '"><div class="deed-fog" aria-hidden="true"></div><header><a class="hash" href="#/tx/'
       + esc(row.hash) + '">' + esc(short(row.hash)) + "</a><span>" + esc(row.phase || "")
       + "</span></header><h3>" + esc(row.summary) + "</h3><p>" + player + " · " + block
       + '</p><a class="deed-out" href="' + esc(row.shannon) + '" target="_blank" rel="noreferrer">Shannon</a></article>';
   }
 
-  function table(actions) {
+  function table(actions, fresh) {
     if (!actions || !actions.length) {
       return "<p class=\"xpl-empty\">No game actions in the recent blocks. Play, and they show up here.</p>";
     }
-    return '<div class="deed-list">' + actions.map(cardHtml).join("") + "</div>";
+    return '<div class="deed-list">' + actions.map(function (row) {
+      return cardHtml(row, fresh && fresh[row.hash]);
+    }).join("") + "</div>";
   }
 
   function paintHome(data, filter) {
@@ -51,9 +57,10 @@
         return blob.indexOf(q) >= 0;
       });
     }
-    stats.innerHTML = "<span class=\"chip\">Shannon " + esc(data.chain) + "</span>"
-      + "<span class=\"chip\">Block " + esc(data.block == null ? "…" : data.block) + "</span>"
-      + "<span class=\"chip\">" + actions.length + " actions</span>";
+    stats.innerHTML = "<span class=\"chip live\"><b><i class=\"live-dot\" aria-hidden=\"true\"></i>LIVE</b><span>Shannon " + esc(data.chain) + "</span></span>"
+      + "<span class=\"chip\"><b>" + esc(data.block == null ? "…" : data.block) + "</b><span>Head block</span></span>"
+      + "<span class=\"chip\"><b>" + esc(data.perMinute == null ? "…" : data.perMinute) + "</b><span>Transactions / min</span></span>"
+      + "<span class=\"chip\"><b>" + actions.length + "</b><span>Actions shown</span></span>";
     contracts.innerHTML = (data.contracts || []).map(function (item) {
       return "<a class=\"chip\" href=\"#/address/" + esc(item.address) + "\"><b>" + esc(item.name) + "</b><span>"
         + esc(short(item.address)) + "</span></a>";
@@ -62,8 +69,21 @@
       return "<a class=\"shade\" href=\"#/address/" + esc(player.address) + "\">" + esc(short(player.address))
         + "<span>" + esc(player.count) + "</span></a>";
     }).join("");
-    view.innerHTML = "<div class=\"xpl-grid\"><div>" + table(actions) + "</div><aside><h2>Players</h2>"
+    // Repaint only when the list changed, so cards do not replay their entrance every poll.
+    var key = (filter || "") + "|" + actions.map(function (row) { return row.hash + ":" + row.phase + ":" + row.block; }).join(",") + "|" + players;
+    if (key === lastHome && view.querySelector(".xpl-grid")) return;
+    lastHome = key;
+    var fresh = null;
+    if (known) {
+      fresh = {};
+      actions.forEach(function (row) { if (!known[row.hash]) fresh[row.hash] = true; });
+    }
+    known = known || {};
+    actions.forEach(function (row) { known[row.hash] = true; });
+    view.innerHTML = "<div class=\"xpl-grid\"><div>" + table(actions, fresh) + "</div><aside><h2>Players</h2>"
       + (players || "<p class=\"xpl-empty\">None in this window.</p>") + "</aside></div>";
+    if (!fresh) view.classList.add("xpl-first");
+    else view.classList.remove("xpl-first");
   }
 
   function paintTx(row) {
@@ -97,6 +117,7 @@
     view.innerHTML = "<p><a href=\"#/\">All actions</a></p><h2 class=\"hash\">" + esc(data.address) + "</h2>"
       + "<p><a href=\"" + esc(data.shannon) + "\" target=\"_blank\" rel=\"noreferrer\">Open on Shannon</a></p>"
       + table(data.actions || []);
+    lastHome = "";
   }
 
   function fail(message) {
@@ -142,5 +163,5 @@
   setInterval(function () {
     var where = route();
     if (!where.kind || where.kind === "q") show();
-  }, 4000);
+  }, 2000);
 })();

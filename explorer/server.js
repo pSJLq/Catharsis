@@ -174,6 +174,9 @@ let resolveReady = null;
 const ready = new Promise((resolve) => {
   resolveReady = resolve;
 });
+// Set once the start-up scan is done, so its rows are not counted as new.
+let warm = false;
+ready.then(() => { warm = true; });
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -750,6 +753,8 @@ function touchRow(hash, block) {
       action: null,
       kind: null,
       gas: null,
+      // When this server first saw the row. Rows from the start-up scan count as old for the per-minute rate.
+      seenAt: warm ? Date.now() : 0,
     };
     feedByHash.set(key, row);
     feed.unshift(row);
@@ -922,11 +927,24 @@ function playerCounts() {
     .map(([address, count]) => ({ address, count, shannon: SHANNON + '/address/' + address }));
 }
 
+// Game transactions first seen in the last 60 s. A row from an old block (a late back-scan) does not count.
+function perMinute() {
+  const since = Date.now() - 60 * 1000;
+  let n = 0;
+  for (const row of feed) {
+    if (!row.seenAt || row.seenAt < since) continue;
+    if (row.block != null && headBlock != null && headBlock - row.block > 1200) continue;
+    n++;
+  }
+  return n;
+}
+
 function feedPayload(actions) {
   return {
     chain: CHAIN,
     network: 'Shannon',
     block: headBlock,
+    perMinute: perMinute(),
     contracts: CONTRACTS.map((item) => ({ ...item, shannon: SHANNON + '/address/' + item.address })),
     players: playerCounts(),
     actions: (actions || feed).map(publicRow),
