@@ -519,6 +519,10 @@ final class Stats implements Listener {
         ticks++;
         long now = System.currentTimeMillis();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
+            // Leave the login hint on the action bar until they are authenticated.
+            if (plugin.auth() != null && !plugin.auth().authed(player)) {
+                continue;
+            }
             UUID id = player.getUniqueId();
             Sheet sheet = sheet(player);
             double max = sheet.health();

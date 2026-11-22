@@ -43,7 +43,7 @@ cookie:
 auth:
   session-hours: 0         # 0 = /login on every join (sessions by name + IP only once a proxy passes the real IP)
   max-accounts-per-ip: 2   # new purses registered per IP (0 = no limit)
-  timeout-seconds: 60      # kick if not logged in by then
+  timeout-seconds: 600     # kick if not logged in by then
   max-attempts: 5          # wrong passwords before a lockout and kick
   lockout-minutes: 15
   min-password-length: 8

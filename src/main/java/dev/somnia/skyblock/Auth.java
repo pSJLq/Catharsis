@@ -2,6 +2,8 @@ package dev.somnia.skyblock;
 
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
@@ -128,7 +130,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
     }
 
     private int timeoutSeconds() {
-        return Math.max(15, plugin.getConfig().getInt("auth.timeout-seconds", 60));
+        return Math.max(15, plugin.getConfig().getInt("auth.timeout-seconds", 600));
     }
 
     private int maxAttempts() {
@@ -296,6 +298,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             }
         }
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        plugin.getLogger().info("Auth: players have " + timeoutSeconds() + " s to log in.");
         deopDevAccounts();
     }
 
@@ -324,7 +327,10 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
                     .append(Component.text(w.register ? "/register <password> <password>" : "/login <password>", NamedTextColor.GREEN))
                     .append(Component.text("  " + left + "s", NamedTextColor.RED)));
             w.bar.progress(Math.max(0f, Math.min(1f, left / (float) timeoutSeconds())));
+            // Action bar every second (it fades on its own); title and chat every 15 s so the title does not flicker.
+            player.sendActionBar(Component.text("Then type ", NamedTextColor.GRAY).append(commandHint(w.register)));
             if (left % 15 == 0) {
+                hintOnScreen(player, w.register, left);
                 prompt(player, w.register);
             }
         }
@@ -453,26 +459,41 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             }
         }
         player.showBossBar(w.bar);
-        player.showTitle(Title.title(
-                Component.text("SOMNIA SKYBLOCK", NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true),
-                Component.text(register ? "/register <password> <password>" : "/login <password>", NamedTextColor.YELLOW),
-                Title.Times.times(Duration.ofMillis(300), Duration.ofSeconds(timeoutSeconds()), Duration.ofMillis(300))));
+        hintOnScreen(player, register, timeoutSeconds());
         prompt(player, register);
         player.updateCommands();
     }
 
     private void prompt(Player player, boolean register) {
         Chat.separator(player, NamedTextColor.GOLD);
-        player.sendMessage(Component.text("  SOMNIA SKYBLOCK", NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true));
+        player.sendMessage(Component.text("  Catharsis", NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true));
+        player.sendMessage(Component.text("  Press T to open chat (in the browser, use the chat button).", NamedTextColor.YELLOW));
         if (register) {
             player.sendMessage(Component.text("  Welcome! Pick a password for your account:", NamedTextColor.YELLOW));
-            player.sendMessage(Component.text("  /register <password> <password>", NamedTextColor.GREEN));
+            player.sendMessage(Component.text("  Then type ", NamedTextColor.GRAY).append(commandHint(true)));
             player.sendMessage(Component.text("  At least " + minLength() + " characters. It locks your purse key; nobody, not even an admin, can reset it.", NamedTextColor.GRAY));
         } else {
             player.sendMessage(Component.text("  Welcome back! Log in to unlock your purse:", NamedTextColor.YELLOW));
-            player.sendMessage(Component.text("  /login <password>", NamedTextColor.GREEN));
+            player.sendMessage(Component.text("  Then type ", NamedTextColor.GRAY).append(commandHint(false)));
         }
         Chat.separator(player, NamedTextColor.GOLD);
+    }
+
+    /** Title, subtitle and action bar: how to open chat, then the command. The command in chat is clickable. */
+    private void hintOnScreen(Player player, boolean register, long left) {
+        player.showTitle(Title.title(
+                Component.text("Catharsis", NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true),
+                Component.text("Press T to open chat (in the browser, use the chat button)", NamedTextColor.YELLOW),
+                Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(Math.max(2, Math.min(20, left))), Duration.ofMillis(200))));
+        player.sendActionBar(Component.text("Then type ", NamedTextColor.GRAY).append(commandHint(register)));
+    }
+
+    private static Component commandHint(boolean register) {
+        String usage = register ? "/register <password> <password>" : "/login <password>";
+        String fill = register ? "/register " : "/login ";
+        return Component.text(usage, NamedTextColor.GREEN)
+                .clickEvent(ClickEvent.suggestCommand(fill))
+                .hoverEvent(HoverEvent.showText(Component.text("Click to type this in chat. It does not send.", NamedTextColor.GRAY)));
     }
 
     private void finish(Player player, boolean registered) {
