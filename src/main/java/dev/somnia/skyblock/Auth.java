@@ -1,6 +1,17 @@
 package dev.somnia.skyblock;
 
+import io.papermc.paper.connection.PlayerGameConnection;
+import io.papermc.paper.dialog.Dialog;
+import io.papermc.paper.dialog.DialogResponseView;
+import io.papermc.paper.event.player.PlayerCustomClickEvent;
+import io.papermc.paper.registry.data.dialog.ActionButton;
+import io.papermc.paper.registry.data.dialog.DialogBase;
+import io.papermc.paper.registry.data.dialog.action.DialogAction;
+import io.papermc.paper.registry.data.dialog.body.DialogBody;
+import io.papermc.paper.registry.data.dialog.input.DialogInput;
+import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
@@ -53,6 +64,11 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
     static final String LIMBO_WORLD = "sb_limbo";
     private static final Set<String> ALLOWED = Set.of("register", "reg", "login", "l", "changepassword");
     private static final Set<String> DEV_CMDS = Set.of("dev", "devmode", "user", "usermode");
+    private static final int DIALOG_PROTOCOL = 771; // Minecraft 1.21.6+
+    private static final Key KEY_REGISTER = Key.key("catharsis", "auth_register");
+    private static final Key KEY_LOGIN = Key.key("catharsis", "auth_login");
+    private static final Key KEY_CLOSE = Key.key("catharsis", "auth_close");
+    private static final Key KEY_OPEN_DIALOG = Key.key("catharsis", "auth_open");
 
     private final SomniaSkyblockPlugin plugin;
     private World limbo;
@@ -462,11 +478,152 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         hintOnScreen(player, register, timeoutSeconds());
         prompt(player, register);
         player.updateCommands();
+        if (supportsDialog(player)) {
+            plugin.getServer().getScheduler().runTask(plugin, () -> showAuthDialog(player, null));
+        }
+    }
+
+    private static boolean supportsDialog(Player player) {
+        if (player == null) {
+            return false;
+        }
+        int version = Npcs.protocol(player);
+        if (version <= 0) {
+            version = player.getProtocolVersion();
+        }
+        return version >= DIALOG_PROTOCOL;
+    }
+
+    private void showAuthDialog(Player player, String error) {
+        if (player == null || !player.isOnline() || authed.contains(player.getUniqueId())) {
+            return;
+        }
+        Wait w = waiting.get(player.getUniqueId());
+        if (w == null || !supportsDialog(player)) {
+            return;
+        }
+        boolean register = w.register;
+        List<DialogBody> body = new java.util.ArrayList<>();
+        if (error != null && !error.isBlank()) {
+            body.add(DialogBody.plainMessage(Component.text(error, NamedTextColor.RED)));
+        }
+        if (register) {
+            body.add(DialogBody.plainMessage(Component.text(
+                    "Welcome! Pick a password for your account (at least " + minLength() + " characters).",
+                    NamedTextColor.YELLOW)));
+            body.add(DialogBody.plainMessage(Component.text(
+                    "The password is visible while typing and cannot be recovered or reset.",
+                    NamedTextColor.GRAY)));
+        } else {
+            body.add(DialogBody.plainMessage(Component.text(
+                    "Welcome back! Enter your password to unlock your purse.",
+                    NamedTextColor.YELLOW)));
+            body.add(DialogBody.plainMessage(Component.text(
+                    "The password is visible while typing.",
+                    NamedTextColor.GRAY)));
+        }
+
+        List<DialogInput> inputs = register
+                ? List.of(
+                        DialogInput.text("pw", Component.text("Password", NamedTextColor.WHITE))
+                                .width(220).maxLength(64).initial("").build(),
+                        DialogInput.text("pw2", Component.text("Confirm password", NamedTextColor.WHITE))
+                                .width(220).maxLength(64).initial("").build())
+                : List.of(
+                        DialogInput.text("pw", Component.text("Password", NamedTextColor.WHITE))
+                                .width(220).maxLength(64).initial("").build());
+
+        ActionButton submit = ActionButton.builder(Component.text(register ? "Register" : "Log in", NamedTextColor.GREEN))
+                .width(150)
+                .action(DialogAction.customClick(register ? KEY_REGISTER : KEY_LOGIN, null))
+                .build();
+        ActionButton close = ActionButton.builder(Component.text("Use chat", NamedTextColor.GRAY))
+                .tooltip(Component.text("Close this window and type the command in chat instead.", NamedTextColor.GRAY))
+                .width(110)
+                .action(DialogAction.customClick(KEY_CLOSE, null))
+                .build();
+
+        Dialog dialog = Dialog.create(factory -> factory.empty()
+                .base(DialogBase.builder(Component.text("Catharsis", NamedTextColor.GOLD, TextDecoration.BOLD))
+                        .canCloseWithEscape(true)
+                        .pause(false)
+                        .afterAction(DialogBase.DialogAfterAction.WAIT_FOR_RESPONSE)
+                        .body(body)
+                        .inputs(inputs)
+                        .build())
+                .type(DialogType.confirmation(submit, close)));
+        player.showDialog(dialog);
+    }
+
+    @EventHandler
+    public void onDialogClick(PlayerCustomClickEvent event) {
+        if (!(event.getCommonConnection() instanceof PlayerGameConnection conn)) {
+            return;
+        }
+        Player player = conn.getPlayer();
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        Key id = event.getIdentifier();
+        boolean isRegister = KEY_REGISTER.equals(id);
+        boolean isLogin = KEY_LOGIN.equals(id);
+        boolean isClose = KEY_CLOSE.equals(id);
+        boolean isOpen = KEY_OPEN_DIALOG.equals(id);
+        if (!isRegister && !isLogin && !isClose && !isOpen) {
+            return;
+        }
+        if (authed.contains(player.getUniqueId()) || !waiting.containsKey(player.getUniqueId())) {
+            if (!isOpen && supportsDialog(player)) {
+                player.closeDialog();
+            }
+            return;
+        }
+        if (isOpen) {
+            showAuthDialog(player, null);
+            return;
+        }
+        if (isClose) {
+            if (supportsDialog(player)) {
+                player.closeDialog();
+            }
+            Wait w = waiting.get(player.getUniqueId());
+            if (w != null) {
+                player.sendMessage(Component.text("Login window closed. Click ", NamedTextColor.YELLOW)
+                        .append(openWindowButton())
+                        .append(Component.text(" or type ", NamedTextColor.YELLOW))
+                        .append(commandHint(w.register))
+                        .append(Component.text(".", NamedTextColor.YELLOW)));
+            }
+            return;
+        }
+        DialogResponseView view = event.getDialogResponseView();
+        String pw = view == null ? null : view.getText("pw");
+        if (pw == null) {
+            pw = "";
+        }
+        if (isRegister) {
+            String pw2 = view == null ? null : view.getText("pw2");
+            if (pw2 == null) {
+                pw2 = "";
+            }
+            register(player, new String[]{pw, pw2}, true);
+        } else {
+            login(player, new String[]{pw}, true);
+        }
+    }
+
+    private static Component openWindowButton() {
+        return Component.text("[Open login window]", NamedTextColor.AQUA, TextDecoration.BOLD)
+                .clickEvent(ClickEvent.custom(KEY_OPEN_DIALOG))
+                .hoverEvent(HoverEvent.showText(Component.text("Click to open the password window.", NamedTextColor.GRAY)));
     }
 
     private void prompt(Player player, boolean register) {
         Chat.separator(player, NamedTextColor.GOLD);
         player.sendMessage(Component.text("  Catharsis", NamedTextColor.GOLD).decoration(TextDecoration.BOLD, true));
+        if (supportsDialog(player)) {
+            player.sendMessage(Component.text("  ").append(openWindowButton()));
+        }
         player.sendMessage(Component.text("  Press T to open chat (in the browser, use the chat button).", NamedTextColor.YELLOW));
         if (register) {
             player.sendMessage(Component.text("  Welcome! Pick a password for your account:", NamedTextColor.YELLOW));
@@ -500,6 +657,9 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         Wait w = waiting.remove(player.getUniqueId());
         if (w != null) {
             player.hideBossBar(w.bar);
+        }
+        if (supportsDialog(player)) {
+            player.closeDialog();
         }
         player.clearTitle();
         for (Player other : plugin.getServer().getOnlinePlayers()) {
@@ -573,8 +733,8 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             return true;
         }
         switch (command.getName().toLowerCase(Locale.ROOT)) {
-            case "register" -> register(player, args);
-            case "login" -> login(player, args);
+            case "register" -> register(player, args, false);
+            case "login" -> login(player, args, false);
             case "changepassword" -> changePassword(player, args);
             case "dev" -> {
                 // Dev accounts only (after /login): /dev cookie opens the Booster test tools; also /dev while already in dev mode.
@@ -601,28 +761,45 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         player.sendMessage(Component.text(text, NamedTextColor.RED));
     }
 
-    private void register(Player player, String[] args) {
+    private void failAuth(Player player, boolean fromDialog, String dialogMsg, String chatMsg) {
+        err(player, chatMsg);
+        if (fromDialog && supportsDialog(player)) {
+            showAuthDialog(player, dialogMsg);
+        }
+    }
+
+    private void register(Player player, String[] args, boolean fromDialog) {
         UUID id = player.getUniqueId();
         Profile profile = plugin.profiles().get(id);
         if (authed.contains(id)) {
-            err(player, "You are already logged in. /changepassword <old> <new> changes it.");
+            if (fromDialog && supportsDialog(player)) {
+                player.closeDialog();
+            } else {
+                err(player, "You are already logged in. /changepassword <old> <new> changes it.");
+            }
             return;
         }
         if (profile.walletEnc != null) {
-            err(player, "You already have an account. Use /login <password>.");
+            Wait w = waiting.get(id);
+            if (w != null) {
+                w.register = false;
+            }
+            failAuth(player, fromDialog,
+                    "You already have an account. Enter your password to log in.",
+                    "You already have an account. Use /login <password>.");
             return;
         }
         if (args.length != 2) {
-            err(player, "Usage: /register <password> <password>");
+            failAuth(player, fromDialog, "Enter and confirm your password.", "Usage: /register <password> <password>");
             return;
         }
         if (!args[0].equals(args[1])) {
-            err(player, "The two passwords are not the same.");
+            failAuth(player, fromDialog, "The two passwords do not match.", "The two passwords are not the same.");
             return;
         }
         String problem = weak(player, args[0]);
         if (problem != null) {
-            err(player, problem);
+            failAuth(player, fromDialog, problem, problem);
             return;
         }
         String fromIp = ip(player);
@@ -630,7 +807,8 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             java.util.List<String> already = registeredFrom(fromIp);
             if (!already.contains(player.getName().toLowerCase(Locale.ROOT)) && already.size() >= maxAccountsPerIp()) {
                 plugin.getLogger().warning("Register refused for " + player.getName() + ": " + already.size() + " accounts already registered from " + fromIp + ".");
-                err(player, "Too many accounts were created from your connection. Log in to one of them instead.");
+                String limitMsg = "Too many accounts were created from your connection. Log in to one of them instead.";
+                failAuth(player, fromDialog, limitMsg, limitMsg);
                 return;
             }
         }
@@ -667,7 +845,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
                 plugin.getLogger().warning("Register failed for " + player.getName() + ": " + e.getClass().getSimpleName());
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     busy.remove(id);
-                    err(player, "Could not create your account. Ask an admin.");
+                    failAuth(player, fromDialog, "Could not create your account. Ask an admin.", "Could not create your account. Ask an admin.");
                 });
                 return;
             }
@@ -737,19 +915,41 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         }
     }
 
-    private void login(Player player, String[] args) {
+    private void login(Player player, String[] args, boolean fromDialog) {
         UUID id = player.getUniqueId();
         Profile profile = plugin.profiles().get(id);
         if (authed.contains(id)) {
-            err(player, "You are already logged in.");
+            if (fromDialog && supportsDialog(player)) {
+                player.closeDialog();
+            } else {
+                err(player, "You are already logged in.");
+            }
             return;
         }
         if (profile.walletEnc == null) {
-            err(player, "You don't have an account yet. Use /register <password> <password>.");
+            Wait w = waiting.get(id);
+            if (w != null) {
+                w.register = true;
+            }
+            failAuth(player, fromDialog,
+                    "No account found yet. Pick a password to register.",
+                    "You don't have an account yet. Use /register <password> <password>.");
+            return;
+        }
+        long lockedFor = Math.max(lockedUntil.getOrDefault("n:" + player.getName().toLowerCase(Locale.ROOT), 0L),
+                lockedUntil.getOrDefault("i:" + ip(player), 0L));
+        if (lockedFor > System.currentTimeMillis()) {
+            long min = Math.max(1, (lockedFor - System.currentTimeMillis() + 59_999) / 60_000);
+            String msg = "Too many wrong passwords. Try again in " + min + " min.";
+            failAuth(player, fromDialog, msg, msg);
             return;
         }
         if (args.length != 1) {
-            err(player, "Usage: /login <password>");
+            failAuth(player, fromDialog, "Enter your password.", "Usage: /login <password>");
+            return;
+        }
+        if (fromDialog && args[0].isEmpty()) {
+            failAuth(player, true, "Enter your password.", "Usage: /login <password>");
             return;
         }
         if (!busy.add(id)) {
@@ -776,7 +976,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
                         Arrays.fill(key, (byte) 0);
                     }
                     if (player.isOnline()) {
-                        wrong(player);
+                        wrong(player, fromDialog);
                     }
                     return;
                 }
@@ -795,6 +995,10 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
     }
 
     private void wrong(Player player) {
+        wrong(player, false);
+    }
+
+    private void wrong(Player player, boolean fromDialog) {
         String n = "n:" + player.getName().toLowerCase(Locale.ROOT);
         String i = "i:" + ip(player);
         int count = Math.max(fails.computeIfAbsent(n, k -> new int[1])[0] += 1, fails.computeIfAbsent(i, k -> new int[1])[0] += 1);
@@ -809,7 +1013,8 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             player.kick(Component.text("Too many wrong passwords. Try again in " + lockoutMinutes() + " min.", NamedTextColor.RED));
             return;
         }
-        err(player, "Wrong password. " + (maxAttempts() - count) + " attempt(s) left.");
+        String msg = "Wrong password. " + (maxAttempts() - count) + " attempt(s) left.";
+        failAuth(player, fromDialog, msg, msg);
     }
 
     /**
