@@ -33,13 +33,19 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import com.destroystokyo.paper.event.server.AsyncTabCompleteEvent;
+import com.destroystokyo.paper.profile.PlayerProfile;
+import io.papermc.paper.connection.PlayerConfigurationConnection;
+import io.papermc.paper.connection.PlayerLoginConnection;
+import io.papermc.paper.event.connection.PlayerConnectionValidateLoginEvent;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerKickEvent;
+import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRecipeBookClickEvent;
+import org.bukkit.plugin.Plugin;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
@@ -79,7 +85,10 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
 
     private final SomniaSkyblockPlugin plugin;
     private World limbo;
+    private static final Component DUPE_AUTHED_MSG = Component.text(
+            "This account is already playing. If this is you, log out first.", NamedTextColor.RED);
     private final Set<UUID> authed = ConcurrentHashMap.newKeySet();
+    private final Map<String, UUID> authedByName = new ConcurrentHashMap<>();
     private final Map<UUID, byte[]> keys = new ConcurrentHashMap<>();
     private final Map<UUID, Long> drainUntil = new ConcurrentHashMap<>();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
@@ -394,8 +403,32 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         return RealIp.of(player);
     }
 
+    private boolean isAuthedOnline(String name, UUID incomingId) {
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            if (!authed.contains(p.getUniqueId())) {
+                continue;
+            }
+            if ((incomingId != null && p.getUniqueId().equals(incomingId))
+                    || (name != null && p.getName().equalsIgnoreCase(name))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void logDuplicateRefusal(String stage, String name, UUID id, java.net.SocketAddress rawSocket, String explicitBrand) {
+        String ip = RealIp.of(rawSocket);
+        String brand = explicitBrand != null ? explicitBrand : preJoinBrand(id, rawSocket);
+        String proto = describeProtocol(id, rawSocket, -1);
+        plugin.getLogger().info("Refused duplicate login (" + stage + ") for " + name
+                + " (already authenticated online): ip=" + ip + " brand=" + brand + " protocol=" + proto);
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+            return;
+        }
         long now = System.currentTimeMillis();
         String n = event.getName().toLowerCase(Locale.ROOT);
         String ip = RealIp.of(event);
@@ -410,10 +443,179 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         if (known != null && !known.equals(event.getName())) {
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
                     Component.text("This name is registered as " + known + ". Join with exactly that name.", NamedTextColor.RED));
+            return;
+        }
+        // Refuse before Paper reaches PlayerList.disconnectAllPlayersWithProfile so an authenticated player is never kicked.
+        if (authedByName.containsKey(n)) {
+            logDuplicateRefusal("prelogin", event.getName(), event.getUniqueId(), event.getRawSocketAddress(), null);
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, DUPE_AUTHED_MSG);
+        }
+    }
+
+    /** Main-thread guard right before Paper disconnects duplicate profiles (covers login->join race; lets limbo be replaced). */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onValidateLogin(PlayerConnectionValidateLoginEvent event) {
+        if (!event.isAllowed()) {
+            return;
+        }
+        String name = null;
+        UUID id = null;
+        java.net.SocketAddress rawSocket = event.getConnection().getAddress();
+        String brand = null;
+        if (event.getConnection() instanceof PlayerLoginConnection lc) {
+            PlayerProfile prof = lc.getAuthenticatedProfile();
+            if (prof == null) {
+                prof = lc.getUnsafeProfile();
+            }
+            if (prof != null) {
+                name = prof.getName();
+                id = prof.getId();
+            }
+        } else if (event.getConnection() instanceof PlayerConfigurationConnection cc) {
+            PlayerProfile prof = cc.getProfile();
+            name = prof.getName();
+            id = prof.getId();
+            brand = cc.getClientBrandName();
+        }
+        if (name != null && isAuthedOnline(name, id)) {
+            logDuplicateRefusal("validate", name, id, rawSocket, brand);
+            event.kickMessage(DUPE_AUTHED_MSG);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onPlayerLogin(PlayerLoginEvent event) {
+        if (event.getResult() != PlayerLoginEvent.Result.ALLOWED) {
+            return;
+        }
+        Player player = event.getPlayer();
+        if (isAuthedOnline(player.getName(), player.getUniqueId())) {
+            logDuplicateRefusal("login", player.getName(), player.getUniqueId(), event.getRealSocketAddress(), null);
+            event.disallow(PlayerLoginEvent.Result.KICK_OTHER, DUPE_AUTHED_MSG);
         }
     }
 
     private final Map<UUID, Location> spawnBack = new ConcurrentHashMap<>();
+
+    private String joinBrand(Player player) {
+        String brand = player.getClientBrandName();
+        if (brand != null && !brand.isBlank()) {
+            return brand;
+        }
+        String eagler = eaglerBrand(player.getUniqueId());
+        if (eagler != null) {
+            return eagler;
+        }
+        return RealIp.isEagler(player.getAddress()) ? "eagler" : null;
+    }
+
+    private String preJoinBrand(UUID id, java.net.SocketAddress rawSocket) {
+        String eagler = eaglerBrand(id);
+        if (eagler != null) {
+            return eagler;
+        }
+        return RealIp.isEagler(rawSocket) ? "eagler (pre-config)" : "unknown (pre-config)";
+    }
+
+    private String eaglerBrand(UUID id) {
+        if (id == null) {
+            return null;
+        }
+        try {
+            Plugin eagler = plugin.getServer().getPluginManager().getPlugin("EaglercraftXServer");
+            if (eagler == null || !eagler.isEnabled()) {
+                return null;
+            }
+            ClassLoader cl = eagler.getClass().getClassLoader();
+            Class<?> apiCls = Class.forName("net.lax1dude.eaglercraft.backend.server.api.bukkit.EaglerXServerAPI", true, cl);
+            Object api = apiCls.getMethod("instance").invoke(null);
+            if (api == null) {
+                return null;
+            }
+            Object bp = api.getClass().getMethod("getPlayerByUUID", UUID.class).invoke(api, id);
+            if (bp == null) {
+                return null;
+            }
+            Object mcBrand = bp.getClass().getMethod("getMinecraftBrand").invoke(bp);
+            if (mcBrand instanceof String s && !s.isBlank()) {
+                return s;
+            }
+            Object desc = bp.getClass().getMethod("getEaglerBrandDesc").invoke(bp);
+            if (desc != null) {
+                Object d = desc.getClass().getMethod("getBrandDesc").invoke(desc);
+                if (d instanceof String s && !s.isBlank()) {
+                    return s;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private String describeProtocol(UUID id, java.net.SocketAddress rawSocket, int playerProto) {
+        try {
+            Plugin via = plugin.getServer().getPluginManager().getPlugin("ViaVersion");
+            if (via != null && via.isEnabled()) {
+                ClassLoader cl = via.getClass().getClassLoader();
+                Class<?> viaCls = Class.forName("com.viaversion.viaversion.api.Via", true, cl);
+                if (id != null) {
+                    Object viaApi = viaCls.getMethod("getAPI").invoke(null);
+                    Object pv = viaApi.getClass().getMethod("getPlayerProtocolVersion", UUID.class).invoke(viaApi, id);
+                    String formatted = formatProtocolVersion(pv);
+                    if (formatted != null) {
+                        return formatted;
+                    }
+                }
+                Object mgr = viaCls.getMethod("getManager").invoke(null);
+                Object cm = mgr.getClass().getMethod("getConnectionManager").invoke(mgr);
+                @SuppressWarnings("unchecked")
+                Iterable<?> conns = (Iterable<?>) cm.getClass().getMethod("getConnections").invoke(cm);
+                for (Object uc : conns) {
+                    Object info = uc.getClass().getMethod("getProtocolInfo").invoke(uc);
+                    if (info == null) {
+                        continue;
+                    }
+                    boolean match = id != null && id.equals(info.getClass().getMethod("getUuid").invoke(info));
+                    if (!match && rawSocket != null) {
+                        Object ch = uc.getClass().getMethod("getChannel").invoke(uc);
+                        if (ch != null) {
+                            Object remote = ch.getClass().getMethod("remoteAddress").invoke(ch);
+                            match = rawSocket.equals(remote);
+                        }
+                    }
+                    if (match) {
+                        Object pv = info.getClass().getMethod("protocolVersion").invoke(info);
+                        String formatted = formatProtocolVersion(pv);
+                        if (formatted != null) {
+                            return formatted;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (playerProto > 0) {
+            return String.valueOf(playerProto);
+        }
+        return RealIp.isEagler(rawSocket) ? "eagler" : "unknown";
+    }
+
+    private static String formatProtocolVersion(Object pv) {
+        if (pv == null) {
+            return null;
+        }
+        try {
+            int ver = (Integer) pv.getClass().getMethod("getVersion").invoke(pv);
+            String name = String.valueOf(pv.getClass().getMethod("getName").invoke(pv));
+            if (ver > 0) {
+                return name + " (" + ver + ")";
+            }
+            return name;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
 
     /** Spawn straight into the limbo cell (no join-time teleport, which makes clients send two moves in one tick). */
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -438,8 +640,24 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
+        String initialBrand = joinBrand(player);
+        plugin.getLogger().info("Join client " + player.getName()
+                + ": ip=" + ip(player)
+                + " brand=" + (initialBrand != null ? initialBrand : "unknown")
+                + " protocol=" + describeProtocol(id, player.getAddress(), player.getProtocolVersion()));
+        if (player.getClientBrandName() == null) {
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline()) {
+                    String late = player.getClientBrandName();
+                    if (late != null) {
+                        plugin.getLogger().info("Client brand " + player.getName() + ": " + late);
+                    }
+                }
+            }, 5L);
+        }
         Profile profile = plugin.profiles().get(id);
         authed.remove(id);
+        authedByName.remove(player.getName().toLowerCase(Locale.ROOT), id);
         Location back = spawnBack.remove(id);
         if (back == null) {
             back = player.getLocation();
@@ -451,6 +669,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         if (s != null && s.uuid().equals(id) && s.expires() > System.currentTimeMillis() && profile.walletEnc != null) {
             keys.put(id, s.key().clone());
             authed.add(id);
+            authedByName.put(player.getName().toLowerCase(Locale.ROOT), id);
             drainUntil.remove(id);
             Location to = back;
             plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -702,6 +921,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         }
         busy.remove(id);
         devQuit(player);
+        authedByName.remove(player.getName().toLowerCase(Locale.ROOT), id);
         if (!authed.remove(id)) {
             return;
         }
@@ -731,6 +951,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         }
         sessions.clear();
         authed.clear();
+        authedByName.clear();
     }
 
     // ------------------------------------------------------------------ commands
@@ -911,6 +1132,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             Arrays.fill(old, (byte) 0);
         }
         authed.add(id);
+        authedByName.put(player.getName().toLowerCase(Locale.ROOT), id);
         drainUntil.remove(id);
         fails.remove("n:" + player.getName().toLowerCase(Locale.ROOT));
         fails.remove("i:" + ip(player));
@@ -1155,6 +1377,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
             return false;
         });
         authed.remove(id);
+        authedByName.remove(name.toLowerCase(Locale.ROOT));
         wipe(id);
         names.set(name.toLowerCase(Locale.ROOT), null);
         saveNames();

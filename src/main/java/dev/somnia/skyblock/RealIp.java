@@ -34,6 +34,7 @@ import java.util.regex.Pattern;
  */
 final class RealIp implements Listener {
     private static final Map<String, Entry> BY_SOCKET = new ConcurrentHashMap<>();
+    private static final Map<String, Long> EAGLER_SOCKETS = new ConcurrentHashMap<>();
     private static final Pattern V4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
     private static final Pattern V6 = Pattern.compile("^[0-9A-Fa-f:.]{2,45}$");
     private static volatile Set<String> trusted = Set.of("127.0.0.1", "0:0:0:0:0:0:0:1");
@@ -111,6 +112,8 @@ final class RealIp implements Listener {
         if (!(raw instanceof InetSocketAddress socket) || socket.getAddress() == null) {
             return;
         }
+        String sk = key(socket);
+        EAGLER_SOCKETS.put(sk, System.currentTimeMillis());
         String peer = socket.getAddress().getHostAddress();
         if (!trusted.contains(peer)) {
             return;
@@ -139,6 +142,18 @@ final class RealIp implements Listener {
             return of(socket);
         }
         return event.getAddress() == null ? "?" : event.getAddress().getHostAddress();
+    }
+
+    static String of(SocketAddress raw) {
+        if (raw instanceof InetSocketAddress socket) {
+            return of(socket);
+        }
+        return "?";
+    }
+
+    static boolean isEagler(SocketAddress raw) {
+        return raw instanceof InetSocketAddress socket && socket.getAddress() != null
+                && EAGLER_SOCKETS.containsKey(key(socket));
     }
 
     static String of(InetSocketAddress socket) {
@@ -172,6 +187,7 @@ final class RealIp implements Listener {
             }
         }
         BY_SOCKET.entrySet().removeIf(e -> e.getValue().at() < cut && !keep.contains(e.getKey()));
+        EAGLER_SOCKETS.entrySet().removeIf(e -> e.getValue() < cut && !keep.contains(e.getKey()));
     }
 
     static String key(InetSocketAddress socket) {
@@ -211,5 +227,6 @@ final class RealIp implements Listener {
         HandlerList.unregisterAll(this);
         bound = false;
         BY_SOCKET.clear();
+        EAGLER_SOCKETS.clear();
     }
 }
