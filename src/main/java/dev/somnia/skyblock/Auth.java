@@ -32,10 +32,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import com.destroystokyo.paper.event.server.AsyncTabCompleteEvent;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRecipeBookClickEvent;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
@@ -58,6 +62,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * AES-256-GCM blob in the profile; /register or /login decrypts it into RAM, quit wipes it (after a short
  * drain so the quit save can finish). A remembered session (same name + IP) keeps the decrypted key in RAM only,
  * so a restart always asks for the password again.
+ * Pre-auth chat that looks like /login or /register is treated as the command (some Java clients auto-send
+ * the login as chat). Paper's chat/command spam limiter still counts those packets unless spigot.yml
+ * enable-spam-exclusions lists the auth prefixes; without that, a burst on join is kicked as "spamming".
  * TODO phase 2: recovery by a signature from the player's main wallet (/link, /recover).
  */
 final class Auth implements Listener, CommandExecutor, TabCompleter {
@@ -572,6 +579,7 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         if (!isRegister && !isLogin && !isClose && !isOpen) {
             return;
         }
+        plugin.getLogger().info("Auth dialog click from " + player.getName() + ": " + id.asString());
         if (authed.contains(player.getUniqueId()) || !waiting.containsKey(player.getUniqueId())) {
             if (!isOpen && supportsDialog(player)) {
                 player.closeDialog();
@@ -1327,6 +1335,8 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         if (colon >= 0) {
             cmd = cmd.substring(colon + 1);
         }
+        // Do not log arguments: they may be the password.
+        plugin.getLogger().info("Pre-auth command from " + event.getPlayer().getName() + ": /" + cmd);
         if (!ALLOWED.contains(cmd)) {
             event.setCancelled(true);
             Wait w = waiting.get(event.getPlayer().getUniqueId());
@@ -1349,12 +1359,69 @@ final class Auth implements Listener, CommandExecutor, TabCompleter {
         if (blocked(event.getPlayer())) {
             event.setCancelled(true);
             event.viewers().clear();
-            err(event.getPlayer(), "Chat opens after you log in.");
+            String raw = PlainTextComponentSerializer.plainText().serialize(event.message()).trim();
+            handlePreAuthChat(event.getPlayer(), raw);
             return;
         }
         // players still in limbo don't read the chat either
         event.viewers().removeIf(a -> a instanceof Player p && blocked(p));
     }
+
+    /** Some Java auto-login clients type "login <password>" or "/login <password>" as chat instead of a command. */
+    private void handlePreAuthChat(Player player, String raw) {
+        if (player == null || raw == null || raw.isBlank()) {
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (player != null && player.isOnline() && blocked(player)) {
+                    err(player, "Chat opens after you log in.");
+                }
+            });
+            return;
+        }
+        String[] parts = raw.trim().split("\\s+");
+        String head = parts[0].toLowerCase(Locale.ROOT);
+        if (head.startsWith("/")) {
+            head = head.substring(1);
+        }
+        int colon = head.indexOf(':');
+        if (colon >= 0) {
+            head = head.substring(colon + 1);
+        }
+        final String cmd = head;
+        final String[] args = parts.length > 1 ? java.util.Arrays.copyOfRange(parts, 1, parts.length) : new String[0];
+        plugin.getLogger().info("Pre-auth chat from " + player.getName() + (ALLOWED.contains(cmd) ? " treated as /" + cmd : " cancelled") + ".");
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline() || !blocked(player)) {
+                return;
+            }
+            switch (cmd) {
+                case "login", "l" -> login(player, args, false);
+                case "register", "reg" -> register(player, args, false);
+                case "changepassword" -> err(player, "Log in first: /login <password>");
+                default -> err(player, "Chat opens after you log in.");
+            }
+        });
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onKick(PlayerKickEvent event) {
+        String reason = PlainTextComponentSerializer.plainText().serialize(event.reason());
+        plugin.getLogger().info(event.getPlayer().getName() + " kicked: cause=" + event.getCause() + " reason=" + reason);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRecipeBookClick(PlayerRecipeBookClickEvent event) {
+        if (blocked(event.getPlayer())) {
+            plugin.getLogger().info("Pre-auth recipe-book click from " + event.getPlayer().getName());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onTabComplete(AsyncTabCompleteEvent event) {
+        if (event.getSender() instanceof Player player && blocked(player)) {
+            plugin.getLogger().info("Pre-auth tab-complete from " + player.getName());
+        }
+    }
+
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onMove(org.bukkit.event.player.PlayerMoveEvent event) {

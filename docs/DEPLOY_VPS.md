@@ -84,6 +84,11 @@ If 25565 stays closed, also set `server-ip=127.0.0.1` in `server.properties` so 
 it for Java clients, leave `server-ip=` empty. A faked `X-Real-IP` on a direct connection is ignored by the plugin,
 because it only trusts that header from `network.trusted-proxies` (127.0.0.1 and ::1, see `docs/caddy-real-ip.md`).
 
+Java clients (and some launchers) may auto-send `/login` or the same text as chat the moment they join. Paper's
+chat/command spam limiter then kicks them with `Kicked for spamming` in the same second. In `spigot.yml` set
+`commands.enable-spam-exclusions: true` and list `/login`, `/l`, `/register`, `/reg`, `/changepassword`, plus the
+same words without a slash (chat-style auto-login). Leave the rest of the spam limiter on.
+
 Also check the OVH control panel: the VPS has no OVH network firewall by default; if you enable it, allow the same ports.
 
 ## 4. Copy the server (no backups)
