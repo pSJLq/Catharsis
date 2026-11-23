@@ -5,6 +5,9 @@
   var stage = document.querySelector("[data-stage]");
   var frame = document.querySelector("[data-frame]");
   var statusNode = document.querySelector("[data-status]");
+  var disconnectBox = document.querySelector("[data-disconnected]");
+  var disconnectReason = document.querySelector("[data-disconnect-reason]");
+  var reconnectBtn = document.querySelector("[data-reconnect]");
   var joinAddress = "ws://127.0.0.1:25565";
   var joinReady = false;
   var queued = false;
@@ -112,8 +115,43 @@
         if (label) label.textContent = "Opening";
       }
       frame.addEventListener("load", function () {
+        if (reconnectBtn) {
+          reconnectBtn.disabled = false;
+          reconnectBtn.removeAttribute("aria-busy");
+          var rLabel = reconnectBtn.querySelector("[data-label]");
+          if (rLabel) rLabel.textContent = "Reconnect";
+        }
         bindFrame();
         grab();
+      });
+      if (reconnectBtn) {
+        reconnectBtn.addEventListener("click", function () {
+          if (!frame) return;
+          reconnectBtn.disabled = true;
+          reconnectBtn.setAttribute("aria-busy", "true");
+          var rLabel = reconnectBtn.querySelector("[data-label]");
+          if (rLabel) rLabel.textContent = "Reconnecting";
+          if (disconnectBox) {
+            disconnectBox.classList.remove("is-on");
+            disconnectBox.hidden = true;
+          }
+          frame.src = "/client/index.html?join=" + encodeURIComponent(joinAddress) + "&r=" + Date.now();
+          grab();
+        });
+      }
+      window.addEventListener("message", function (event) {
+        if (event.origin !== location.origin || !frame || event.source !== frame.contentWindow) return;
+        if (!event.data || event.data.type !== "catharsis:disconnected") return;
+        if (!disconnectBox) return;
+        var reason = String(event.data.reason || "").trim();
+        if (disconnectReason) disconnectReason.textContent = reason || "Connection to the world closed.";
+        disconnectBox.hidden = false;
+        disconnectBox.classList.add("is-on");
+        try { if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock(); } catch (e) {}
+        try {
+          var doc = childDoc();
+          if (doc && doc.pointerLockElement && doc.exitPointerLock) doc.exitPointerLock();
+        } catch (e) {}
       });
       frame.src = "/client/index.html?join=" + encodeURIComponent(joinAddress);
       stage.classList.add("is-live");
@@ -223,7 +261,7 @@
   }
 
   function playing() {
-    return !!(started && stage && stage.classList.contains("is-live"));
+    return !!(started && stage && stage.classList.contains("is-live") && (!disconnectBox || disconnectBox.hidden));
   }
 
   function fromGame(e) {
@@ -539,74 +577,14 @@
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduced) return;
   var brand = document.querySelector("[data-eyes]");
-  var brandPupils = brand ? brand.querySelectorAll(".pupil") : [];
+  if (!brand) return;
+  var brandPupils = brand.querySelectorAll(".pupil");
   var mouse = { x: window.innerWidth * 0.62, y: 220, on: false };
-  var shown = 0;
-  var buttons = [];
-  var scanned = 0;
-  var root = document.createElement("div");
-  root.className = "wisp";
-  root.setAttribute("aria-hidden", "true");
-  root.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg"><filter id="catharsis-goo" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8"/></filter></svg><div class="wisp-goo"></div><div class="wisp-face"><span class="socket"><img class="pupil" src="/img/eye-l.png" alt=""></span><span class="socket"><img class="pupil" src="/img/eye-r.png" alt=""></span></div>';
-  document.body.appendChild(root);
-  var goo = root.querySelector(".wisp-goo");
-  var face = root.querySelector(".wisp-face");
-  var facePupils = face.querySelectorAll(".pupil");
-  var head = { x: mouse.x, y: mouse.y + 70 };
-  var dir = { x: 0, y: 1 };
-
-  function makeDots(count, thick, thin) {
-    var dots = [];
-    var i;
-    for (i = 0; i < count; i++) {
-      var el = document.createElement("span");
-      el.className = "blob";
-      var size = thick + (thin - thick) * (i / (count - 1));
-      el.style.width = size.toFixed(1) + "px";
-      el.style.height = size.toFixed(1) + "px";
-      goo.appendChild(el);
-      dots.push(el);
-    }
-    return dots;
-  }
-
-  var mass = makeDots(3, 46, 32);
-  var leash = makeDots(9, 28, 22);
-  var arms = [
-    { ox: -176, oy: 26, rate: 0.045, phase: 0.4, amp: 26, dots: makeDots(22, 30, 24) },
-    { ox: 184, oy: 8, rate: 0.04, phase: 2.3, amp: 24, dots: makeDots(22, 28, 24) },
-    { ox: 10, oy: 198, rate: 0.035, phase: 4.1, amp: 18, dots: makeDots(24, 30, 24) },
-    { ox: 84, oy: -58, rate: 0.05, phase: 1.2, amp: 14, dots: makeDots(18, 24, 26), grab: true }
-  ];
-  var ai;
-  for (ai = 0; ai < arms.length; ai++) {
-    arms[ai].x = head.x + arms[ai].ox;
-    arms[ai].y = head.y + arms[ai].oy;
-  }
-
-  function overGame(x, y) {
-    var stage = document.querySelector("[data-stage].is-live");
-    if (!stage) return false;
-    var rect = stage.getBoundingClientRect();
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-  }
-
-  function cursorGone() {
-    if (document.hidden || document.pointerLockElement) return true;
-    var live = document.querySelector("[data-stage].is-live");
-    if (!live) return false;
-    var fr = live.querySelector("iframe");
-    try {
-      return !!(fr && fr.contentDocument && fr.contentDocument.pointerLockElement);
-    } catch (e) {
-      return false;
-    }
-  }
 
   window.addEventListener("pointermove", function (event) {
     mouse.x = event.clientX;
     mouse.y = event.clientY;
-    mouse.on = !cursorGone() && !overGame(event.clientX, event.clientY);
+    mouse.on = !document.hidden && !document.pointerLockElement;
   }, { passive: true });
   window.addEventListener("pointerleave", function () { mouse.on = false; });
   window.addEventListener("mouseout", function (event) {
@@ -633,56 +611,11 @@
       x += (shift.x - x) * 0.2;
       y += (shift.y - y) * 0.2;
       var move = "translate(-50%, -50%) translate(" + x.toFixed(2) + "px, " + y.toFixed(2) + "px) scaleY(" + blink.toFixed(3) + ")";
-      var i;
-      for (i = 0; i < pupils.length; i++) pupils[i].style.transform = move;
+      for (var i = 0; i < pupils.length; i++) pupils[i].style.transform = move;
     };
   }
 
   var lookBrand = tracker(14);
-  var lookFace = tracker(5);
-
-  function nearest(x, y, now) {
-    if (now - scanned > 500) {
-      buttons = Array.prototype.slice.call(document.querySelectorAll(".btn"));
-      scanned = now;
-    }
-    var best = null;
-    var bestD = 240;
-    var i;
-    for (i = 0; i < buttons.length; i++) {
-      var rect = buttons[i].getBoundingClientRect();
-      if (!rect.width || rect.bottom < 0 || rect.top > window.innerHeight) continue;
-      var cx = rect.left + rect.width / 2;
-      var cy = rect.top + rect.height / 2;
-      var dist = Math.hypot(cx - x, cy - y);
-      if (dist < bestD) {
-        bestD = dist;
-        best = { x: cx, y: cy };
-      }
-    }
-    return best;
-  }
-
-  function bend(ax, ay, cx, cy, amount) {
-    var mx = (ax + cx) / 2;
-    var my = (ay + cy) / 2;
-    var dx = cx - ax;
-    var dy = cy - ay;
-    var len = Math.hypot(dx, dy) || 1;
-    return { x: mx + (-dy / len) * amount, y: my + (dx / len) * amount };
-  }
-
-  function paint(dots, ax, ay, bx, by, cx, cy) {
-    var n = dots.length;
-    var i;
-    for (i = 0; i < n; i++) {
-      var t = i / (n - 1);
-      var u = 1 - t;
-      var x = u * u * ax + 2 * u * t * bx + t * t * cx;
-      var y = u * u * ay + 2 * u * t * by + t * t * cy;
-      dots[i].style.transform = "translate3d(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px, 0) translate(-50%, -50%)";
-    }
-  }
 
   function blinkOf(now) {
     var beat = now % 4800;
@@ -692,62 +625,15 @@
   }
 
   function frame(now) {
-    if (cursorGone()) mouse.on = false;
-    var hidden = !mouse.on;
-    root.classList.toggle("is-off", hidden);
-    if (!hidden) root.style.opacity = "1";
     var aimX = mouse.x;
     var aimY = mouse.y;
-    if (!mouse.on && brand) {
+    if (!mouse.on) {
       var box = brand.getBoundingClientRect();
       aimX = box.left + box.width / 2 + Math.cos(now / 1400) * 160;
       aimY = box.top + box.height / 2 + 80 + Math.sin(now / 1400) * 40;
     }
-    var blink = blinkOf(now);
-    if (brand) {
-      var home = brand.getBoundingClientRect();
-      lookBrand(brandPupils, home.left + home.width / 2, home.top + home.height / 2, aimX, aimY, blink);
-    }
-    if (hidden) {
-      window.requestAnimationFrame(frame);
-      return;
-    }
-    var vx = mouse.x - head.x;
-    var vy = mouse.y - head.y;
-    var vlen = Math.hypot(vx, vy);
-    if (vlen > 8) {
-      dir.x = vx / vlen;
-      dir.y = vy / vlen;
-    }
-    head.x += (mouse.x - dir.x * 62 - head.x) * 0.16;
-    head.y += (mouse.y - dir.y * 62 - head.y) * 0.16;
-    var m;
-    for (m = 0; m < mass.length; m++) {
-      var ang = now / 880 + m * 1.5;
-      var spread = 6 + m * 2.2;
-      mass[m].style.transform = "translate3d(" + (head.x + Math.cos(ang) * spread).toFixed(1) + "px, " + (head.y + Math.sin(ang) * spread * 0.75).toFixed(1) + "px, 0) translate(-50%, -50%)";
-    }
-    var leashBend = bend(head.x, head.y, mouse.x, mouse.y, Math.sin(now / 210) * 12);
-    paint(leash, head.x, head.y, leashBend.x, leashBend.y, mouse.x, mouse.y);
-    var grab = mouse.on ? nearest(mouse.x, mouse.y, now) : null;
-    var a;
-    for (a = 0; a < arms.length; a++) {
-      var arm = arms[a];
-      var tx = head.x + arm.ox + Math.sin(now / 540 + arm.phase) * arm.amp;
-      var ty = head.y + arm.oy + Math.cos(now / 640 + arm.phase) * arm.amp * 0.6;
-      var rate = arm.rate;
-      if (arm.grab && grab) {
-        tx = grab.x;
-        ty = grab.y;
-        rate = 0.22;
-      }
-      arm.x += (tx - arm.x) * rate;
-      arm.y += (ty - arm.y) * rate;
-      var ctrl = bend(head.x, head.y, arm.x, arm.y, Math.sin(now / 260 + arm.phase) * 30);
-      paint(arm.dots, head.x, head.y, ctrl.x, ctrl.y, arm.x, arm.y);
-    }
-    face.style.transform = "translate3d(" + head.x.toFixed(1) + "px, " + head.y.toFixed(1) + "px, 0)";
-    lookFace(facePupils, head.x, head.y, mouse.x, mouse.y, blink);
+    var home = brand.getBoundingClientRect();
+    lookBrand(brandPupils, home.left + home.width / 2, home.top + home.height / 2, aimX, aimY, blinkOf(now));
     window.requestAnimationFrame(frame);
   }
   window.requestAnimationFrame(frame);

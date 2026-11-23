@@ -18,7 +18,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
   <link rel="apple-touch-icon" href="/img/favicon-192.png">
-  <link rel="stylesheet" href="/css/site.css?v=20261109-hall4">
+  <link rel="stylesheet" href="/css/site.css?v=20261123-lockdown">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -58,6 +58,16 @@
                 <span class="spin" aria-hidden="true"></span>
                 <span data-label>Play</span>
               </button>
+            </div>
+            <div class="stage-disconnected" data-disconnected hidden role="status" aria-live="polite">
+              <div class="stage-disconnected-box">
+                <h3>Disconnected from Catharsis</h3>
+                <p data-disconnect-reason>Connection to the world closed.</p>
+                <button class="btn" type="button" data-reconnect>
+                  <span class="spin" aria-hidden="true"></span>
+                  <span data-label>Reconnect</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -123,6 +133,6 @@
     </section>
   </main>
   <!--layout:footer-->
-  <script src="/js/site.js?v=20261120-ctrlq"></script>
+  <script src="/js/site.js?v=20261123-lockdown"></script>
 </body>
 </html>
