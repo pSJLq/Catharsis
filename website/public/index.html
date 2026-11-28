@@ -18,7 +18,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/img/favicon-192.png">
   <link rel="apple-touch-icon" href="/img/favicon-192.png">
-  <link rel="stylesheet" href="/css/site.css?v=20261123-lockdown">
+  <link rel="stylesheet" href="/css/site.css?v=20261128-loading4">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -58,6 +58,19 @@
                 <span class="spin" aria-hidden="true"></span>
                 <span data-label>Play</span>
               </button>
+            </div>
+            <div class="stage-loading" data-loading role="status" aria-live="polite">
+              <div class="stage-loading-box">
+                <img class="stage-loading-mark" src="/img/emblem.jpg" width="56" height="56" alt="">
+                <h3>Catharsis</h3>
+                <p class="stage-loading-status" data-loading-status>Loading Catharsis&hellip;</p>
+                <div class="stage-loading-bar" aria-hidden="true"><span></span></div>
+                <p class="stage-loading-timer" data-loading-timer aria-hidden="true"></p>
+                <p class="stage-loading-hint" data-loading-hint>This can take a minute the first time.</p>
+                <button class="btn stage-loading-refresh" type="button" data-loading-refresh hidden>
+                  <span data-label>Refresh</span>
+                </button>
+              </div>
             </div>
             <div class="stage-disconnected" data-disconnected hidden role="status" aria-live="polite">
               <div class="stage-disconnected-box">
@@ -133,6 +146,6 @@
     </section>
   </main>
   <!--layout:footer-->
-  <script src="/js/site.js?v=20261123-lockdown"></script>
+  <script src="/js/site.js?v=20261128-loading4"></script>
 </body>
 </html>

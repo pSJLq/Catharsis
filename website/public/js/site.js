@@ -8,6 +8,11 @@
   var disconnectBox = document.querySelector("[data-disconnected]");
   var disconnectReason = document.querySelector("[data-disconnect-reason]");
   var reconnectBtn = document.querySelector("[data-reconnect]");
+  var loadingBox = document.querySelector("[data-loading]");
+  var loadingStatus = document.querySelector("[data-loading-status]");
+  var loadingTimer = document.querySelector("[data-loading-timer]");
+  var loadingHint = document.querySelector("[data-loading-hint]");
+  var loadingRefresh = document.querySelector("[data-loading-refresh]");
   var joinAddress = "ws://127.0.0.1:25565";
   var joinReady = false;
   var queued = false;
@@ -99,8 +104,156 @@
     if (label) label.textContent = text;
   }
 
+  // ---- Loading overlay: first visit downloads ~57 MB, compiles WASM, then connects. Say what is going on.
+  var HINTS_DOWNLOAD = [
+    "This can take a minute the first time. The game is about 57 MB.",
+    "Nothing is frozen: the game is downloading. Next visits open much faster.",
+    "Hang on. Once it is downloaded it is saved in your browser."
+  ];
+  var loadState = null;
+
+  function mmss(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    return Math.floor(sec / 60) + ":" + (sec % 60 < 10 ? "0" : "") + (sec % 60);
+  }
+
+  function loadingText(node, text) {
+    if (node && node.textContent !== text) node.textContent = text;
+  }
+
+  function loadingStop() {
+    if (!loadState) return;
+    window.clearInterval(loadState.tick);
+    window.clearInterval(loadState.hook);
+    loadState = null;
+    if (loadingBox) loadingBox.classList.remove("is-on");
+  }
+
+  function hookSocket() {
+    if (!loadState || !frame) return;
+    var win, doc, Orig;
+    try {
+      win = frame.contentWindow;
+      if (!win || !win.location || win.location.pathname.indexOf("/client/") !== 0) return;
+      doc = win.document;
+      if (!doc || doc === loadState.hookedDoc || doc === loadState.staleDoc) return;
+      Orig = win.WebSocket;
+      if (!Orig) return;
+      var Wrapped = function (url, protocols) {
+        var sock = protocols === undefined ? new Orig(url) : new Orig(url, protocols);
+        try {
+          if (loadState) loadState.wsSeen = true;
+          sock.addEventListener("open", function () { if (loadState) loadState.wsOpen = true; });
+        } catch (e) {}
+        return sock;
+      };
+      Wrapped.prototype = Orig.prototype;
+      Wrapped.CONNECTING = Orig.CONNECTING;
+      Wrapped.OPEN = Orig.OPEN;
+      Wrapped.CLOSING = Orig.CLOSING;
+      Wrapped.CLOSED = Orig.CLOSED;
+      win.WebSocket = Wrapped;
+      loadState.hookedDoc = doc;
+      window.clearInterval(loadState.hook);
+      loadState.hook = 0;
+    } catch (e) {}
+  }
+
+  function loadingTick() {
+    if (!loadState) return;
+    var now = Date.now();
+    var el = (now - loadState.t0) / 1000;
+    var hasCanvas = false;
+    var bootReady = false;
+    try {
+      var doc = childDoc();
+      if (doc && loadState.frameSet && doc !== loadState.staleDoc) {
+        hasCanvas = !!(doc.querySelector && doc.querySelector("canvas"));
+        // The game has its own boot screen (#loading_screen); it gets .is-ready once the game screen is up.
+        var boot = doc.getElementById && doc.getElementById("loading_screen");
+        bootReady = !!(boot && boot.classList && boot.classList.contains("is-ready"));
+      }
+    } catch (e) {}
+    if (hasCanvas && !loadState.canvasAt) loadState.canvasAt = now;
+    loadingText(loadingTimer, mmss(el));
+
+    // Game screen is up (first-time players see the profile screen, returning players connect): hand over.
+    if (loadState.wsOpen || bootReady) {
+      loadingText(loadingStatus, loadState.wsOpen ? "Connected. Entering the world\u2026" : "Ready!");
+      loadingText(loadingHint, "");
+      if (!loadState.openAt) loadState.openAt = now;
+      if (now - loadState.openAt > 700) loadingStop();
+      return;
+    }
+    if (el > 300) { loadingStop(); return; }
+    if (el > 90) {
+      loadingText(loadingStatus, "Still loading\u2026 If nothing happens, refresh the page.");
+      loadingText(loadingHint, "A slow connection can make the first load take a few minutes.");
+      if (loadingRefresh) loadingRefresh.hidden = false;
+      return;
+    }
+    if (!loadState.frameSet) {
+      loadingText(loadingStatus, "Loading Catharsis\u2026");
+      loadingText(loadingHint, HINTS_DOWNLOAD[0]);
+    } else if (!loadState.frameLoaded) {
+      loadingText(loadingStatus, loadState.reconnect ? "Connecting to the server\u2026" : "Downloading the game\u2026");
+      loadingText(loadingHint, loadState.reconnect ? "" : HINTS_DOWNLOAD[Math.floor(el / 9) % HINTS_DOWNLOAD.length]);
+    } else if (!loadState.wsSeen) {
+      loadingText(loadingStatus, "Starting the game\u2026");
+      loadingText(loadingHint, "Getting everything ready. This takes a few seconds.");
+      // If the game never reports ready (client changed), do not cover it forever once its canvas is up.
+      if (loadState.canvasAt && now - loadState.canvasAt > 25000) loadingStop();
+    } else {
+      loadingText(loadingStatus, "Connecting to the server\u2026");
+      loadingText(loadingHint, "Almost there.");
+    }
+  }
+
+  function loadingBegin() {
+    if (!loadingBox || loadState) return;
+    loadState = { t0: Date.now(), frameSet: false, frameLoaded: false, wsSeen: false, wsOpen: false,
+      openAt: 0, canvasAt: 0, hookedDoc: null, staleDoc: null, reconnect: false, tick: 0, hook: 0 };
+    if (loadingRefresh) loadingRefresh.hidden = true;
+    loadingBox.classList.add("is-on");
+    loadState.tick = window.setInterval(loadingTick, 250);
+    loadingTick();
+  }
+
+  function loadingFrameStarted(isReconnect) {
+    if (isReconnect) {
+      loadingStop();
+      loadingBegin();
+    }
+    if (!loadState) return;
+    // The previous game document stays in the frame until the new one commits; ignore it.
+    loadState.staleDoc = childDoc();
+    loadState.frameSet = true;
+    loadState.frameLoaded = false;
+    loadState.wsSeen = false;
+    loadState.wsOpen = false;
+    loadState.hookedDoc = null;
+    loadState.openAt = 0;
+    loadState.canvasAt = 0;
+    loadState.reconnect = !!isReconnect;
+    window.clearInterval(loadState.hook);
+    loadState.hook = window.setInterval(hookSocket, 40);
+    loadingTick();
+  }
+
+  function loadingFrameLoaded() {
+    if (!loadState || !loadState.frameSet) return;
+    loadState.frameLoaded = true;
+    hookSocket();
+    loadingTick();
+  }
+
+  if (loadingRefresh) {
+    loadingRefresh.addEventListener("click", function () { window.location.reload(); });
+  }
+
   function startGame() {
     if (!stage || !frame) return;
+    loadingBegin();
     if (!joinReady) {
       queued = true;
       return;
@@ -115,6 +268,7 @@
         if (label) label.textContent = "Opening";
       }
       frame.addEventListener("load", function () {
+        loadingFrameLoaded();
         if (reconnectBtn) {
           reconnectBtn.disabled = false;
           reconnectBtn.removeAttribute("aria-busy");
@@ -136,12 +290,14 @@
             disconnectBox.hidden = true;
           }
           frame.src = "/client/index.html?join=" + encodeURIComponent(joinAddress) + "&r=" + Date.now();
+          loadingFrameStarted(true);
           grab();
         });
       }
       window.addEventListener("message", function (event) {
         if (event.origin !== location.origin || !frame || event.source !== frame.contentWindow) return;
         if (!event.data || event.data.type !== "catharsis:disconnected") return;
+        loadingStop();
         if (!disconnectBox) return;
         var reason = String(event.data.reason || "").trim();
         if (disconnectReason) disconnectReason.textContent = reason || "Connection to the world closed.";
@@ -154,6 +310,7 @@
         } catch (e) {}
       });
       frame.src = "/client/index.html?join=" + encodeURIComponent(joinAddress);
+      loadingFrameStarted(false);
       stage.classList.add("is-live");
       releaseLauncherFocus();
     }

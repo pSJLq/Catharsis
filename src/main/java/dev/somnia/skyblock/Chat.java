@@ -84,7 +84,7 @@ final class Chat implements Listener {
 
     void welcome(Player player, Profile profile) {
         separator(player, NamedTextColor.GREEN);
-        player.sendMessage(centred("Welcome to Somnia SkyBlock!", NamedTextColor.YELLOW, true));
+        player.sendMessage(centred("Welcome to Catharsis!", NamedTextColor.YELLOW, true));
         player.sendMessage(Component.empty());
         player.sendMessage(centred("Your island, purse and bag live on Somnia.", NamedTextColor.YELLOW, false));
         player.sendMessage(centred("Right-click the Nether Star for the SkyBlock Menu.", NamedTextColor.GRAY, false));
